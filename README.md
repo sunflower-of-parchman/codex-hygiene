@@ -1,17 +1,19 @@
 # Codex Hygiene
 
-A small Codex skill for diagnosing and reducing Codex Desktop token/context drain.
+A small Codex skill for auditing and tuning Codex Desktop context and tool surfaces.
 
-It is meant for cases where usage suddenly grows and the likely cause is not the code task itself, but broad context assembly: large app/plugin/MCP tool surfaces, repeated uncached MCP tool snapshots, stale project config, long-lived thread replay, subagent fan-out, or high-reasoning background work.
+It is meant for user-owned configuration hygiene: checking whether MCPs, apps, skills, project stanzas, subagents, or long-running goal workflows are broader than needed for the current work.
+
+It does not assume a product defect. It helps users measure their own setup, keep tools intentionally scoped, and avoid accidental over-triggering or replay patterns.
 
 This is a community skill, not an official OpenAI project.
 
 ## What It Does
 
 - Measures recent Codex Desktop tool-list and token telemetry with read-only SQLite queries.
-- Helps identify whether the main driver is app surface size, MCP/plugin state, failed snapshot reuse, stale project stanzas, long-thread replay, or background fan-out.
-- Gives a reversible cleanup sequence instead of deleting logs, caches, or projects.
-- Keeps long-running goal work quality-aware: reduce context replay without blindly lowering reasoning, banning subagents, or avoiding real source evidence.
+- Helps identify whether elevated usage correlates with app surface size, MCP/plugin state, snapshot reuse, stale project stanzas, long-thread replay, or background fan-out.
+- Suggests reversible hygiene steps instead of deleting logs, caches, or projects.
+- Keeps long-running goal work quality-aware: narrow replay and tool scope without blindly lowering reasoning, banning subagents, or avoiding real source evidence.
 
 ## Install
 

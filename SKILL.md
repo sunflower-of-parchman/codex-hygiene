@@ -1,13 +1,13 @@
 ---
 name: codex-hygiene
-description: Diagnose and reduce Codex Desktop token/context drain from bloated app/plugin/MCP surfaces, repeated tool listing, stale project stanzas, and long-lived thread replay. Use when Codex usage suddenly grows, `codex_apps` dominates tool counts, MCP snapshots are repeatedly uncached, old project paths accumulate, multi-day or multi-week `/goal` threads are repeatedly resumed, or the user wants a safe hygiene plan for Codex config and context surfaces.
+description: Audit and tune Codex Desktop context/tool surfaces so apps, MCPs, skills, project stanzas, subagents, and long-running goals stay intentionally scoped. Use when Codex usage increases unexpectedly, `codex_apps` has a large tool count, MCP tool snapshots appear repeatedly uncached, old project paths accumulate, multi-day or multi-week `/goal` threads are repeatedly resumed, or the user wants a safe hygiene plan for Codex config and context surfaces.
 ---
 
 # Codex Hygiene
 
-Use this skill to shrink Codex context overhead safely. Start read-only, measure first, then make reversible config edits only when the user asks.
+Use this skill to audit and tune Codex context overhead safely. Start read-only, measure first, then make reversible config edits only when the user asks.
 
-Core rule: clean up broad context, idle capability, and accidental replay; do not make the agent evidence-avoidant or degrade the work product.
+Core rule: make context, tool availability, and long-running thread continuation intentional; do not make the agent evidence-avoidant or degrade the work product.
 
 ## Quick Start
 
@@ -34,17 +34,17 @@ Filter verification to a fresh thread when old active threads may pollute the re
 ## Workflow
 
 1. Measure current state with the script before making claims.
-2. Identify the primary drain:
+2. Identify the primary contributor:
    - `codex_apps` large tool count
    - enabled unused MCPs or plugins
-   - repeated `has_cached_tool_info_snapshot=false`
+   - repeated MCP tool snapshot rows without cache reuse
    - stale `[projects."..."]` stanzas
    - long-lived thread history replay
    - subagent, automation, or high-reasoning background fan-out
 3. Keep output small: exact timestamps, counts, and one recommended fix sequence.
 4. Back up `~/.codex/config.toml` before any edit.
-5. Apply the smallest reversible config change that targets the measured driver.
-6. Start a fresh tiny thread and remeasure the same counters.
+5. Apply the smallest reversible config change that targets the measured contributor.
+6. When useful, start a fresh tiny measurement thread and remeasure the same counters without replacing active work.
 
 ## Guardrails
 
@@ -55,7 +55,7 @@ Filter verification to a fresh thread when old active threads may pollute the re
 - Preserve tiny local helper MCPs unless the user specifically wants them removed. Common examples are `node_repl` and `openai-api-key-local-confirmation`.
 - Prefer local `git` and `gh` for normal commits, rebases, merges, and pushes. The GitHub MCP/app surface is mainly for PRs, issues, reviews, CI artifacts, and remote API work.
 
-## Known Fix Pattern
+## Known Tuning Pattern
 
 If `codex_apps` remains large after per-app disables, the per-app config may be parsed but not applied to Desktop tool listing. One observed setup stayed around `166-167` tools until the global Apps feature was disabled. In that case, the effective global switch is:
 
@@ -74,7 +74,7 @@ Read `references/long-thread-replay.md` when the user needs to preserve a goal/t
 
 ## Verification
 
-After cleanup, use a fresh tiny thread:
+After tuning, use a fresh tiny measurement thread:
 
 ```text
 Please reply exactly: OK
@@ -95,7 +95,7 @@ Then rerun the measurement script. Good signs:
 
 Return:
 
-- Root cause of token burn.
+- Observed contributor to elevated usage.
 - What changed or what prompt/config was prepared.
 - What was intentionally kept for quality.
 - What remains risky or user-approved only.

@@ -1,4 +1,4 @@
-# Codex Hygiene Remediation Reference
+# Codex Hygiene Tuning Reference
 
 Use these patterns after measurement and backup. Keep edits scoped and reversible.
 
@@ -11,7 +11,7 @@ cp -p "$HOME/.codex/config.toml" "$HOME/.codex/config.toml.pre-codex-hygiene-$ts
 
 ## Disable Global Apps Surface
 
-Use when `codex_apps` dominates fresh-thread `list_all_tools` and per-app disables do not shrink the count.
+Use when measurement shows `codex_apps` has a large fresh-thread `list_all_tools` count and the user wants broad app access off by default.
 
 ```toml
 [features]
