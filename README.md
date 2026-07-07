@@ -2,11 +2,9 @@
 
 A small Codex skill for auditing and tuning Codex Desktop context and tool surfaces.
 
-It is meant for user-owned configuration hygiene: checking whether MCPs, apps, skills, project stanzas, subagents, or long-running goal workflows are broader than needed for the current work.
+Use it to measure recent Codex Desktop telemetry, review MCP/app/skill availability, and keep long-running goal workflows scoped to the current work.
 
-It does not assume a product defect. It helps users measure their own setup, keep tools intentionally scoped, and avoid accidental over-triggering or replay patterns.
-
-This is a community skill, not an official OpenAI project.
+Community skill for local Codex setup hygiene.
 
 ## What It Does
 
