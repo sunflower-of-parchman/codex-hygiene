@@ -1,75 +1,85 @@
-# Long-Thread Replay Hygiene
+# Long-Thread Context Hygiene
 
-Use this when a long-running Codex goal/thread must be preserved and token usage is unexpectedly high.
+Use this when a multi-day or multi-week Codex goal must stay alive while local telemetry shows unexpectedly high per-thread cumulative token growth.
 
-This especially applies to multi-day or multi-week single `/goal` threads that are repeatedly resumed, where old rollout history may be pulled into context even when current work only needs current ledgers, status files, and generated evidence.
+The goal itself is not the default suspect. First separate runtime-managed context from agent-chosen rereading.
 
-## Portable Evidence Sources
+## Two Different Mechanisms
 
-Check current local evidence before recommending reset/archive/removal:
+### Runtime-managed context
 
-- `$CODEX_HOME/config.toml` for model, reasoning, plugins, features, agents, and tools.
-- `$CODEX_HOME/state_*.sqlite` for thread metadata, archived state, rollout paths, and token records when available.
-- `$CODEX_HOME/goals_*.sqlite` for active, paused, or completed goal state when available.
-- `$CODEX_HOME/logs_*.sqlite` for recent token telemetry and tool-list rows.
-- Current repo status, ledgers, dashboards, lock files, generated artifacts, and process checks for the actual work.
+Codex may attach conversation history, compacted summaries, system instructions, skill metadata, or tool definitions while starting or resuming a thread. A steering prompt cannot remove context already attached by the runtime.
 
-Use `sqlite3 -readonly`, `rg`, `sed`, `du`, `ps`, `lsof`, `jq`, `stat`, and repo helper scripts. Do not edit SQLite databases directly.
+Use a fresh tiny thread as a comparison, inspect current supported compaction or thread controls, and preserve the active goal unless the user approves a fork, archive, reset, or replacement.
 
-## Classify Elevated Usage
+### Agent-chosen rereading
 
-| Signal | Possible contributor | Hygiene step |
+The agent or its subagents may actively reopen old rollout files, transcript exports, broad plugin documentation, unrelated skill instructions, or large generated logs. A narrowing prompt can reduce this work by directing the agent to current repo state and bounded evidence.
+
+Do not claim that this also removed runtime-managed context. Remeasure the same thread and compare it with a fresh-thread baseline.
+
+## Evidence Sources
+
+Check current local evidence before recommending thread changes:
+
+- `$CODEX_HOME/config.toml` for models, reasoning, plugins, features, agents, and tools
+- `$CODEX_HOME/state_*.sqlite` for thread metadata and token records when available
+- `$CODEX_HOME/goals_*.sqlite` for goal state when available
+- `$CODEX_HOME/logs_*.sqlite` for recent token and tool-list telemetry
+- current repo status, ledgers, dashboards, lock files, generated artifacts, and process checks
+
+Use `sqlite3 -readonly` for databases. Treat internal schemas and filenames as version-dependent, and avoid full log or transcript dumps.
+
+## Classify The Signal
+
+| Signal | Candidate contributor | Next check |
 | --- | --- | --- |
-| Huge rollout file, old or repeatedly resumed `/goal` thread, millions of input tokens | Thread context replay | Continue from current repo evidence or send a narrowing prompt |
-| Many enabled unrelated plugins/skills | Broad runtime surface | Disable unused plugins or tell the active thread not to discover/load them |
-| High `agents.max_threads` or many subagents | Parallel context multiplication | Cap subagents and assign bounded work |
-| Scheduled automation on high reasoning | Background usage | Pause/lower automation or narrow its prompt |
-| Large source media/project files | Usually not the model-context contributor | Process through deterministic tools, hashes, manifests, and generated summaries |
+| Large per-thread cumulative deltas after resume | Runtime context or active rereading | Compare with a fresh tiny thread and inspect agent reads |
+| Large rollout file plus repeated explicit rollout reads | Agent-chosen transcript replay | Continue from current ledgers and generated evidence |
+| Many unrelated available plugins or tools | Broad capability surface | Compare model-visible tool rows and disable only with approval |
+| High `agents.max_threads` or many subagents | Parallel context multiplication | Count workers and bound assignments |
+| Scheduled high-reasoning automation | Background usage | Inspect current runs and narrow or pause with approval |
+| Large source media or project files | Usually source evidence, not automatic prompt context | Use deterministic tools, manifests, and bounded summaries |
 
-If the user wants the original goal to register as completed, prefer in-thread narrowing over archiving/restarting. Archive or fork only after explicit user approval.
+Use multiple signals before assigning cause, and state confidence and uncertainty in the final report.
 
 ## Preserve Quality
 
-Do not lower reasoning effort when the remaining work is final synthesis, final review, validation, or quality-sensitive analysis.
-
-Do not ban subagents by default. Instead:
-
-- Use subagents only when they improve quality or parallel verification.
-- Assign exact bounded units.
-- Forbid broad transcript, plugin, and skill reloading inside subagents.
-- Keep each subagent on current repo state and current evidence surfaces.
-
-Do not tell agents to avoid large files generally. Large audio, MIDI, video, archives, and project files may be primary evidence. Avoid raw context dumps, not source evidence.
+- Keep high reasoning for final synthesis, validation, and quality-sensitive analysis when needed.
+- Use subagents when they improve quality, but assign exact bounded units.
+- Keep subagents on current repo state and current evidence.
+- Continue using large audio, MIDI, video, archive, and project files when they are primary evidence; process them through established tools instead of pasting raw contents into context.
 
 ## Narrowing Prompt
 
-Use or adapt this when a long thread should finish without resetting the goal:
+Use or adapt this when the active goal should continue:
 
 ```text
 Continue the existing goal. Do not create a new goal, reset the timer, fork, or archive this thread.
 
-Operate in final-mile focus mode:
+Operate from current evidence:
 
 - Keep analysis quality high where final judgment, synthesis, or validation requires it.
-- Use subagents only for bounded, work-relevant checks that improve quality.
-- Do not use broad exploratory subagents.
-- Do not load broad skill lists, plugin docs, old rollout history, or old transcript context.
-- Do not use unrelated plugins/apps/tools. Use only the tools already needed for this work.
-- Work from current repo state, current ledgers/status files, current generated evidence, and exact bounded units.
-- Use deterministic local helpers before model synthesis when possible.
-- Large source media/project files are allowed evidence. Analyze them with the established local pipeline; do not paste raw large contents into model context.
-- For huge text/JSON/log files, read targeted keys, ledger tails, hashes, manifests, or repo-generated summaries.
+- Use subagents only for bounded checks that improve the current work.
+- Do not actively open old rollout files or transcript exports unless a specific missing fact requires them.
+- Do not actively read unrelated skill or plugin documentation or invoke unrelated tools.
+- Work from current repo state, current ledgers and status files, current generated evidence, and exact bounded units.
+- Use deterministic local helpers before model synthesis when practical.
+- Process large source media through the established local pipeline; do not paste raw large contents into model context.
+- For large text, JSON, or logs, read targeted keys, ledger tails, hashes, manifests, or generated summaries.
 
-Report only: current state, exact bounded action, subagents used if any, evidence generated or verified, validation, goal status, and next safest bounded action.
+Report only: current state, bounded action, subagents used, evidence generated or verified, validation, goal status, and next bounded action.
+
+This prompt narrows agent-chosen reads. It does not guarantee that runtime-managed resume context is absent.
 ```
 
 ## Common Mistakes
 
-| Mistake | Why it hurts | Better |
-| --- | --- | --- |
-| "Just start a new thread" | May lose proof of a long-running goal | Offer in-thread narrowing first |
-| "Do not use subagents" | Can degrade final analysis quality | Use bounded, relevant subagents |
-| "Avoid huge files" | Rejects real media evidence | Avoid raw context dumps, not source evidence |
-| "Disable everything" | May remove required project tools | Keep only work-relevant capabilities |
-| Trusting stale dashboards | Misreads operational state | Verify live process, ledger, and status files |
-| Editing databases directly | Risks corrupting app state | Use read-only SQL and app/config tools |
+| Mistake | Better approach |
+| --- | --- |
+| Treating the long-running goal itself as the cause | Preserve the goal and distinguish runtime context from active rereading |
+| Assuming a prompt removes already attached context | Compare thread-local telemetry with a fresh baseline |
+| Banning all subagents | Use bounded, relevant subagents |
+| Avoiding large source files | Avoid raw context dumps while retaining source evidence |
+| Disabling every tool | Keep work-relevant capabilities and measure each change |
+| Editing databases directly | Use read-only SQL and supported app or config controls |

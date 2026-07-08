@@ -1,28 +1,43 @@
 # Codex Hygiene Tuning Reference
 
-Use these patterns after measurement and backup. Keep edits scoped and reversible.
+Use these patterns after measurement and explicit approval. Keep edits scoped, reversible, and compatible with the user's current Codex build.
+
+Local telemetry databases, caches, and CLI output are version-dependent diagnostic surfaces. Recheck supported configuration before presenting an observed workaround as general behavior.
 
 ## Backup
 
 ```bash
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 ts=$(date -u +%Y%m%dT%H%M%SZ)
-cp -p "$HOME/.codex/config.toml" "$HOME/.codex/config.toml.pre-codex-hygiene-$ts"
+cp -p "$CODEX_HOME_DIR/config.toml" \
+  "$CODEX_HOME_DIR/config.toml.pre-codex-hygiene-$ts"
 ```
 
-## Disable Global Apps Surface
+## App Controls
 
-Use when measurement shows `codex_apps` has a large fresh-thread `list_all_tools` count and the user wants broad app access off by default.
+Disable a selected connector with the current documented per-app setting:
+
+```toml
+[apps."connector-id"]
+enabled = false
+```
+
+Per-tool controls are also available when the build supports them. Verify the result against fresh-thread tool-list rows instead of assuming that an approval or enablement setting changed the model-visible surface.
+
+Disable the complete Apps/connectors surface only when that is the intended scope:
 
 ```toml
 [features]
 apps = false
 ```
 
-Optional per-app intent markers can remain for documentation, but the global feature flag is the measured effective switch for removing the Apps tool surface.
+On one July 2026 Desktop setup, per-app values were parsed but the fresh `codex_apps` tool count remained around `166-167` until the global feature was disabled. Treat that as version-specific local evidence. First use current documented controls, then use the global switch when all Apps should be off or measurement confirms the narrower control is ineffective on that build.
 
-## Disable Unused MCPs
+Cached app-tool files are inventory, not enabled-state evidence. Record their modification time and compare it with the measurement window.
 
-Use existing local command/path/url values where present. Do not invent plugin cache paths.
+## MCP Controls
+
+Use existing local command, path, URL, and environment-variable names. Do not invent plugin cache paths or credentials.
 
 ```toml
 [mcp_servers.github]
@@ -35,13 +50,9 @@ url = "https://developers.openai.com/mcp"
 enabled = false
 ```
 
-For local/plugin MCPs, preserve any existing `command`, `args`, and `cwd`; only add or change:
+For local or plugin MCPs, preserve existing `command`, `args`, `cwd`, and `url` fields; change only the `enabled` value unless another edit is required and approved.
 
-```toml
-enabled = false
-```
-
-Common candidates when unused:
+Common candidates when unused include:
 
 - `codex-security`
 - `computer-use`
@@ -50,18 +61,20 @@ Common candidates when unused:
 - `github`
 - `openaiDeveloperDocs`
 
-## Subagent And Automation Trimming
+An enabled plugin can contribute skills or other capabilities without attaching an MCP tool surface. Keep plugin installation state, MCP state, and model-visible tool rows separate in the diagnosis.
 
-Use these only when measurement or config review shows fan-out/background cost.
+## Subagents And Automations
 
-- Lower broad `agents.max_threads` only when high fan-out is not needed.
-- Pause or narrow high-reasoning automations that are not actively useful.
-- Prefer bounded subagent assignments over banning subagents completely.
-- For long-running goals, prefer an in-thread narrowing prompt before archiving, forking, or restarting.
+Use these only when telemetry or config review shows background or parallel fan-out:
 
-## Project-Local Service MCP
+- Lower broad `agents.max_threads` when high fan-out is unnecessary.
+- Pause or narrow high-reasoning automations that are not currently useful.
+- Prefer bounded subagent assignments over banning subagents.
+- Prefer in-thread narrowing before archiving, forking, or replacing a long-running goal.
 
-When a remote service is needed only in specific repositories, disable broad app access globally and add a repo-local MCP in `<repo>/.codex/config.toml`. Supabase-style example:
+## Project-Local MCP
+
+When a service is needed only in specific repositories, use a trusted repo's `<repo>/.codex/config.toml`:
 
 ```toml
 [mcp_servers.supabase]
@@ -72,32 +85,33 @@ args = ["--project-ref=<project-ref>"]
 network_access = true
 ```
 
-Do not print service-role keys, access tokens, or full `.env` contents.
+Do not print service-role keys, access tokens, or full `.env` contents. Confirm that the project is trusted because Codex skips project-scoped configuration for untrusted projects.
 
 ## Stale Project Stanzas
 
-Count first:
+Count without printing paths:
 
 ```bash
-rg -o '^\[projects\."([^"]+)"\]' -r '$1' "$HOME/.codex/config.toml" \
-  | while IFS= read -r p; do [ -d "$p" ] || echo missing; done | wc -l
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+rg -o '^\[projects\."([^"]+)"\]' -r '$1' "$CODEX_HOME_DIR/config.toml" \
+  | while IFS= read -r p; do [ -d "$p" ] || echo missing; done \
+  | wc -l
 ```
 
-Remove stale stanzas only after backup. Do not print the full missing path list unless the user asks.
+Remove only confirmed stale stanzas after backup. Do not print the complete missing-path list unless the user asks.
 
-## Fresh Thread Measurement
+## Fresh Measurement
 
-Create a fresh thread with:
+Create a fresh tiny thread:
 
 ```text
 Please reply exactly: OK
 ```
 
-Then rerun:
+Then run:
 
 ```bash
-SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/codex-hygiene"
-"$SKILL_DIR/scripts/measure_codex_context.sh" 5 <fresh_thread_id>
+"<skill-directory>/scripts/measure_codex_context.sh" 5 <fresh_thread_id>
 ```
 
-Compare `listed MCP tools`, snapshot cache flags, and `post sampling token usage`.
+Compare tool-list rows, distinct thread counts, snapshot flags, per-thread cumulative token deltas, and cache age. Treat the telemetry as diagnostic evidence rather than billing totals.

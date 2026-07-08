@@ -1,102 +1,100 @@
 ---
 name: codex-hygiene
-description: Audit and tune Codex Desktop context/tool surfaces so apps, MCPs, skills, project stanzas, subagents, and long-running goals stay intentionally scoped. Use when Codex usage increases unexpectedly, `codex_apps` has a large tool count, MCP tool snapshots appear repeatedly uncached, old project paths accumulate, multi-day or multi-week `/goal` threads are repeatedly resumed, or the user wants a safe hygiene plan for Codex config and context surfaces.
+description: Audit Codex Desktop context and tool surfaces with compact read-only telemetry. Use when usage rises unexpectedly, `codex_apps` is large, many MCPs or plugins are enabled, snapshot rows repeat, project stanzas are stale, or long-running goals may be reloading unnecessary context.
 ---
 
 # Codex Hygiene
 
-Use this skill to audit and tune Codex context overhead safely. Start read-only, measure first, then make reversible config edits only when the user asks.
-
-Core rule: make context, tool availability, and long-running thread continuation intentional; do not make the agent evidence-avoidant or degrade the work product.
-
-## Quick Start
-
-Run the compact read-only measurement:
-
-```bash
-SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/codex-hygiene"
-"$SKILL_DIR/scripts/measure_codex_context.sh"
-```
-
-Use a shorter or longer window:
-
-```bash
-"$SKILL_DIR/scripts/measure_codex_context.sh" 5
-"$SKILL_DIR/scripts/measure_codex_context.sh" 30
-```
-
-Filter verification to a fresh thread when old active threads may pollute the recent window:
-
-```bash
-"$SKILL_DIR/scripts/measure_codex_context.sh" 5 <thread_id>
-```
+Audit first, identify the measured contributor, and make reversible changes only when the user asks. Keep required evidence and capabilities available.
 
 ## Workflow
 
-1. Measure current state with the script before making claims.
-2. Identify the primary contributor:
-   - `codex_apps` large tool count
+1. Resolve this skill's directory from the loaded `SKILL.md` path.
+2. Run the bundled measurement before making claims:
+
+```bash
+"<skill-directory>/scripts/measure_codex_context.sh" 30
+"<skill-directory>/scripts/measure_codex_context.sh" 5 <thread_id>
+```
+
+3. Classify the strongest measured contributor:
+   - large `codex_apps` tool surface
    - enabled unused MCPs or plugins
-   - repeated MCP tool snapshot rows without cache reuse
+   - repeated tool-list or uncached snapshot rows
    - stale `[projects."..."]` stanzas
-   - long-lived thread history replay
-   - subagent, automation, or high-reasoning background fan-out
-3. Keep output small: exact timestamps, counts, and one recommended fix sequence.
-4. Back up `~/.codex/config.toml` before any edit.
-5. Apply the smallest reversible config change that targets the measured contributor.
-6. When useful, start a fresh tiny measurement thread and remeasure the same counters without replacing active work.
+   - long-thread context replay or active transcript rereading
+   - subagent, automation, or high-reasoning fan-out
+4. Return exact timestamps and compact counts with one recommended sequence.
+5. Back up `config.toml` before any approved edit.
+6. Remeasure the same window and thread scope after the change.
+
+## Interpret Signals Carefully
+
+- Tool-list and snapshot rows describe context/tool assembly, not actual tool calls.
+- Plugin enablement does not prove that plugin tools were attached to the model.
+- Cached app inventory can be stale and does not prove current app enablement.
+- Per-thread token deltas are local cumulative telemetry, not billing totals.
+- Treat internal SQLite schemas and cache layouts as version-dependent.
 
 ## Guardrails
 
-- Use `sqlite3 -readonly` for logs.
-- Do not dump full logs, full config, app tool schemas, MCP schemas, secrets, or `.env` values.
+- Use `sqlite3 -readonly` for Codex databases.
+- Do not dump full logs, config, app or MCP schemas, secrets, `.env` values, or complete missing-path lists.
 - Do not delete logs, caches, config, worktrees, or project directories as a first response.
-- Do not disable broad surfaces without either explicit user approval or a clear prior user preference.
-- Preserve tiny local helper MCPs unless the user specifically wants them removed. Common examples are `node_repl` and `openai-api-key-local-confirmation`.
-- Prefer local `git` and `gh` for normal commits, rebases, merges, and pushes. The GitHub MCP/app surface is mainly for PRs, issues, reviews, CI artifacts, and remote API work.
+- Do not disable surfaces without explicit user approval or a clear prior preference.
+- Preserve small required helpers unless the user asks to remove them. Common examples are `node_repl` and `openai-api-key-local-confirmation`.
+- Prefer local `git` and `gh` for ordinary commits, rebases, merges, and pushes when PR, issue, review, CI artifact, or remote API tools are unnecessary.
 
-## Known Tuning Pattern
+## App Controls
 
-If `codex_apps` remains large after per-app disables, the per-app config may be parsed but not applied to Desktop tool listing. One observed setup stayed around `166-167` tools until the global Apps feature was disabled. In that case, the effective global switch is:
+Use current documented per-app controls when only selected connectors should be disabled:
+
+```toml
+[apps."connector-id"]
+enabled = false
+```
+
+Use the global switch only when the user wants all Apps/connectors unavailable or fresh measurement shows that per-app controls do not shrink the surface on that local build:
 
 ```toml
 [features]
 apps = false
 ```
 
-Use repo-local MCP config for tools that are only needed in specific projects, such as database or deployment services. See `references/remediation.md` for edit patterns.
+Verify either change against fresh-thread `list_all_tools` rows. See the [remediation reference](references/remediation.md) for backups, MCP controls, project-local configuration, and observed fallback behavior.
 
-## Long-Thread Replay Pattern
+## Long-Running Goals
 
-If a multi-day or multi-week `/goal` thread is repeatedly resumed and shows enormous input token counts, treat it as context replay unless proven otherwise. Fix by continuing from current repo evidence, ledgers, generated artifacts, and status files instead of replaying full transcript history. Disable unrelated plugins/skills, constrain subagents, and reserve high reasoning for final analysis quality rather than every resume.
+Do not treat a valuable long-running goal as the problem by default. Separate:
 
-Read `references/long-thread-replay.md` when the user needs to preserve a goal/thread, avoid losing completion state, or keep quality high while reducing context replay.
+- runtime-managed resume, compaction, system, or tool context that may already be attached
+- agent-chosen rereading of old rollouts, transcripts, broad plugin docs, or unrelated evidence
+
+A narrowing prompt can stop unnecessary agent-chosen reads; it cannot guarantee that runtime-managed context was removed. Compare with a fresh tiny measurement thread when attribution matters, while preserving the active goal unless the user approves a fork, archive, reset, or replacement.
+
+Read the [long-thread reference](references/long-thread-replay.md) when the goal must stay alive or final analysis quality must remain high.
 
 ## Verification
 
-After tuning, use a fresh tiny measurement thread:
+Create a fresh measurement thread when useful:
 
 ```text
 Please reply exactly: OK
 ```
 
-Then rerun the measurement script. Good signs:
+Then rerun the five-minute measurement with that thread id. Good signs include:
 
-```bash
-"$SKILL_DIR/scripts/measure_codex_context.sh" 5 <fresh_thread_id>
-```
+- no `codex_apps` rows when Apps are globally disabled
+- only intentionally available MCPs in `list_all_tools`
+- fewer or explainable snapshot rows
+- lower per-thread cumulative deltas, or a remaining floor attributable to base, system, tool, or thread context
 
-- No `server_name=codex_apps` rows when Apps are globally disabled.
-- Only intentionally enabled MCPs remain in `list_all_tools`.
-- Tool snapshot rows are few and explainable.
-- Token usage drops or the remaining floor is attributable to base/system/thread context.
-
-## Final Report Shape
+## Final Report
 
 Return:
 
-- Observed contributor to elevated usage.
-- What changed or what prompt/config was prepared.
-- What was intentionally kept for quality.
-- What remains risky or user-approved only.
-- Verification commands or checks run.
+- measured contributor and confidence
+- change made or prepared
+- capability intentionally retained
+- remaining uncertainty or approval boundary
+- verification performed
