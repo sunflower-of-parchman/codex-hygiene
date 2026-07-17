@@ -148,7 +148,7 @@ class CodexActivityReviewTest(unittest.TestCase):
             (
                 epoch("2026-07-12T11:00:02Z"),
                 "codex_core_skills::render",
-                "turn{thread.id=thread-user-secret turn.id=turn-current model=gpt-5.6-sol codex.turn.reasoning_effort=max}: truncated skill metadata to fit skills context budget budget_limit=8000 total_skills=140 included_skills=100 omitted_skills=40 truncated_description_chars_per_skill=24 truncated_skill_descriptions=100",
+                "turn{thread.id=thread-user-secret turn.id=turn-current model=gpt-5.6-sol codex.turn.reasoning_effort=max}: truncated skill metadata to fit skills context budget budget_limit=8000 total_skills=140 included_skills=140 omitted_skills=0 truncated_description_chars_per_skill=24 truncated_skill_descriptions=100",
                 "thread-user-secret",
             ),
             (
@@ -299,7 +299,8 @@ esac
         self.assertEqual(current["compactions"], 1)
         self.assertEqual(current["verification_commands"], 1)
         self.assertEqual(current["dynamic_tool_surface"]["distinct_tools"], 2)
-        self.assertEqual(current["skill_context"]["max_omitted_skills"], 40)
+        self.assertEqual(current["skill_context"]["max_omitted_skills"], 0)
+        self.assertEqual(current["skill_context"]["max_truncated_descriptions"], 100)
         self.assertEqual(current["skill_reads"][0], {"name": "codex-hygiene", "value": 1})
         self.assertGreater(current["serialized_tool_output_bytes"], 0)
         self.assertEqual(current["compaction_source"], "rollout")
@@ -339,8 +340,35 @@ esac
         self.assertIn("codex-hygiene", result.stdout)
         self.assertIn("prior comparison unavailable", result.stdout)
         self.assertIn("Log coverage:", result.stdout)
+        self.assertIn(
+            "Suppressed prior-period comparisons: **observed turns, local cumulative token change, tool calls, and tool runtime**.",
+            result.stdout,
+        )
+        self.assertIn("rolling 7-day (168-hour) window", result.stdout)
+        self.assertIn("most descriptions shortened in one event: **100**", result.stdout)
+        self.assertIn("most skills omitted in one event: **0**", result.stdout)
+        self.assertIn("zero omitted skills can coexist with shortened descriptions", result.stdout)
         self.assertNotIn(str(self.root), result.stdout)
         self.assertNotIn("private tool result", result.stdout)
+
+    def test_markdown_explains_nested_exec_runtime_labels(self) -> None:
+        self._append_logs(
+            [
+                (
+                    epoch("2026-07-12T11:00:07Z"),
+                    "codex_core::tools::parallel",
+                    "turn{thread.id=thread-user-secret turn.id=turn-current model=gpt-5.6-sol codex.turn.reasoning_effort=max}: tool call completed tool_name=exec_command call_id=call-two total_duration_ms=500",
+                    "thread-user-secret",
+                )
+            ]
+        )
+        result = self.run_report("--no-rollouts")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "`exec` and `exec_command` are separate retained runtime labels",
+            result.stdout,
+        )
+        self.assertIn("not automatically distinct user actions", result.stdout)
 
     def test_no_rollouts_keeps_core_report_available(self) -> None:
         result = self.run_report("--no-rollouts", "--format", "json")
@@ -373,6 +401,12 @@ esac
         self.assertEqual(report["current"]["compaction_source"], "log-attempt")
         self.assertEqual(report["current"]["tool_calls"], 1)
         self.assertEqual(report["current"]["token_delta"], 150)
+        markdown = self.run_report("--no-rollouts")
+        self.assertEqual(markdown.returncode, 0, markdown.stderr)
+        self.assertIn(
+            "Suppressed prior-period comparisons: **observed turns, local cumulative token change, tool calls, tool runtime, and compactions**.",
+            markdown.stdout,
+        )
 
     def test_partial_log_retention_suppresses_comparisons(self) -> None:
         result = self.run_report("--no-rollouts", "--format", "json")
@@ -471,6 +505,9 @@ esac
         self.assertIsNone(report["current"]["skill_reads"])
         self.assertIsNone(report["current"]["serialized_tool_output_bytes"])
         self.assertTrue(any("automatic size guard" in item for item in report["warnings"]))
+        self.assertTrue(
+            any("--max-auto-rollout-mib 3" in item for item in report["warnings"])
+        )
 
 
 if __name__ == "__main__":

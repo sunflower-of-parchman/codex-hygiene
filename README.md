@@ -1,10 +1,12 @@
 # Codex Hygiene
 
-A Codex skill for auditing Codex Desktop context, tool surfaces, and local work patterns over time.
+A compact Codex skill for auditing Codex Desktop context and tool surfaces, with an optional privacy-preserving review of local work patterns over time.
 
 Use it for compact diagnostics or a privacy-preserving activity review of observed models, reasoning levels, tools, skills, plugins, compactions, subagents, automations, and token changes.
 
 Community skill for local Codex setup hygiene.
+
+The compact measurement remains the default when no lookback period or retrospective is requested. The activity review is an additive mode; existing measurement commands and output remain unchanged.
 
 ## What It Does
 
@@ -71,6 +73,8 @@ The standard report stays on compact SQLite telemetry. It automatically enriches
 python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 30 --deep
 ```
 
+When the automatic guard skips enrichment, the warning reports an exact `--max-auto-rollout-mib N` rerun. That option approves the measured candidate size while retaining a ceiling; `--deep` ignores the ceiling.
+
 The report excludes prompts, responses, thread titles and IDs, commands, tool results, full paths, and secrets. Token changes are diagnostic local deltas rather than billing totals, and task duration includes tool work. Rollout-derived fields say `not measured` when enrichment does not run; they are never presented as measured zeros.
 
 ## Compatibility
@@ -92,6 +96,7 @@ The report excludes prompts, responses, thread titles and IDs, commands, tool re
 ## Contents
 
 ```text
+CHANGELOG.md
 SKILL.md
 agents/openai.yaml
 scripts/measure_codex_context.sh

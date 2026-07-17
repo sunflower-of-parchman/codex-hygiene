@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex Hygiene"
-  short_description: "Audit Codex usage and work patterns"
-  default_prompt: "Use $codex-hygiene to review my local Codex activity over the period I specify, explain the strongest measured contributors, and label uncertainty."
+  short_description: "Audit Codex context and local activity"
+  default_prompt: "Use $codex-hygiene to run the compact read-only Codex context and tool-surface measurement. If I specify a lookback period or retrospective, run the privacy-preserving activity review instead and label evidence, interpretation, and uncertainty."

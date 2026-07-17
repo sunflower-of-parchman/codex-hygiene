@@ -9,7 +9,7 @@ Audit first, distinguish observed evidence from interpretation, and make reversi
 
 ## Choose The Review
 
-- For a current usage or tool-surface question, run the compact measurement.
+- When the request does not specify a lookback period or retrospective, run the compact measurement. This preserves the original default behavior.
 - For reflection across a specified period or comparison with the preceding period, run the activity review.
 
 ## Compact Measurement
@@ -52,6 +52,8 @@ The default report uses read-only SQLite telemetry and automatically enriches fr
 ```bash
 python3 "<skill-directory>/scripts/codex_activity_review.py" --days 30 --deep
 ```
+
+When the guard skips enrichment, use the exact `--max-auto-rollout-mib N` value reported in the warning to approve that measured candidate size while retaining a ceiling. Use `--deep` only when the caller wants to ignore the ceiling.
 
 Read [activity-review.md](references/activity-review.md) when interpreting fields, confidence, comparison windows, or the deep-scan boundary.
 

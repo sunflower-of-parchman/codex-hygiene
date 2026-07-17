@@ -70,6 +70,14 @@ LOG_TARGETS = (
     "mcp",
 )
 
+COMPARISON_LABELS = (
+    ("turns", "observed turns"),
+    ("token_delta", "local cumulative token change"),
+    ("tool_calls", "tool calls"),
+    ("tool_runtime_ms", "tool runtime"),
+    ("compactions", "compactions"),
+)
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -176,6 +184,16 @@ def percent(numerator: int | float, denominator: int | float) -> float:
 
 def plural(count: int | float, singular: str, plural_form: str | None = None) -> str:
     return singular if int(count) == 1 else (plural_form or f"{singular}s")
+
+
+def join_words(values: list[str]) -> str:
+    if not values:
+        return "none"
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
 
 
 def median(values: Iterable[int | float]) -> float:
@@ -1182,7 +1200,7 @@ def build_findings(
         findings.append(
             {
                 "confidence": "high",
-                "observed": f"{top_tool['tool']} had the largest observed tool runtime in retained log coverage: {human_duration(top_tool['runtime_ms'])} across {top_tool['calls']} calls.{automatic_note}",
+                "observed": f"{top_tool['tool']} had the largest observed tool runtime in retained log coverage: {human_duration(top_tool['runtime_ms'])} across {top_tool['calls']} {plural(top_tool['calls'], 'call')}.{automatic_note}",
                 "interpretation": "It was the strongest measured tool-runtime contributor in this window.",
                 "unknown": "Tool runtime does not isolate prompt-schema tokens, result tokens, or the value of the returned evidence.",
             }
@@ -1190,16 +1208,16 @@ def build_findings(
 
     skill_context = current["skill_context"]
     if skill_context["metadata_truncation_events"]:
-        truncation_detail = (
-            f"as many as {skill_context['max_omitted_skills']} skills were omitted from an initial catalog"
+        omitted_detail = (
+            f"as many as {skill_context['max_omitted_skills']} skills were omitted"
             if skill_context["max_omitted_skills"]
-            else f"as many as {skill_context['max_truncated_descriptions']} skill descriptions were shortened"
+            else "no skills were omitted"
         )
         findings.append(
             {
                 "confidence": "high",
-                "observed": f"Skill metadata was truncated in {skill_context['metadata_truncation_events']} observed context-build events; {truncation_detail}.",
-                "interpretation": "The installed skill catalog exceeded the runtime's initial skills-list budget during part of the selected period.",
+                "observed": f"Skill-list budget pressure appeared in {skill_context['metadata_truncation_events']} observed context-build events; as many as {skill_context['max_truncated_descriptions']} skill descriptions were shortened, and {omitted_detail}.",
+                "interpretation": "The runtime shortened descriptions or omitted entries to fit its initial skills-list budget during part of the selected period.",
                 "unknown": "This does not show that omitted skills, included skills, or full SKILL.md files were invoked.",
             }
         )
@@ -1217,8 +1235,9 @@ def build_findings(
 
     if current["compactions"]:
         if current["compaction_source"] == "rollout":
+            verb = "was" if current["compactions"] == 1 else "were"
             compaction_observed = (
-                f"{current['compactions']} explicit context-compaction events were observed "
+                f"{current['compactions']} explicit {plural(current['compactions'], 'context-compaction event')} {verb} observed "
                 "in retained rollout telemetry."
             )
             compaction_interpretation = (
@@ -1229,8 +1248,9 @@ def build_findings(
                 "tool schemas, tool output, or source evidence."
             )
         else:
+            verb = "was" if current["compactions"] == 1 else "were"
             compaction_observed = (
-                f"{current['compactions']} remote-compaction attempts were observed in retained log telemetry."
+                f"{current['compactions']} {plural(current['compactions'], 'remote-compaction attempt')} {verb} observed in retained log telemetry."
             )
             compaction_interpretation = (
                 "At least one thread attempted context management during retained log coverage."
@@ -1277,7 +1297,7 @@ def build_findings(
         findings.append(
             {
                 "confidence": top_plugin["confidence"],
-                "observed": f"Name matching associated {top_plugin['plugin']} with {top_plugin['matched_tool_calls']} tool calls, {human_duration(top_plugin['matched_tool_runtime_ms'])} of tool runtime, and {skill_read_text}.",
+                "observed": f"Name matching associated {top_plugin['plugin']} with {top_plugin['matched_tool_calls']} {plural(top_plugin['matched_tool_calls'], 'tool call')}, {human_duration(top_plugin['matched_tool_runtime_ms'])} of tool runtime, and {skill_read_text}.",
                 "interpretation": "This is the strongest plugin-associated activity signal available from current names and retained events.",
                 "unknown": "The runtime does not retain a stable historical plugin-to-tool-to-skill attribution table, so name matches can miss or misclassify relationships.",
             }
@@ -1430,6 +1450,11 @@ def coverage_text(entry: dict[str, Any]) -> str:
 def render_markdown(report: dict[str, Any], top: int) -> str:
     current = report["current"]
     comparison = report["comparison"]
+    suppressed_comparisons = [
+        label
+        for key, label in COMPARISON_LABELS
+        if not comparison.get(key, {}).get("comparable", True)
+    ]
     compaction_label = (
         "Compactions" if current["compaction_source"] == "rollout" else "Compaction attempts"
     )
@@ -1439,6 +1464,8 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         f"Generated: `{report['generated_at']}`  ",
         f"Window: `{current['start']}` through `{current['end']}`",
         "",
+        f"> This is a rolling {report['days']}-day ({report['days'] * 24}-hour) window, so observed activity can fall across parts of up to {report['days'] + 1} UTC calendar dates.",
+        "",
         "> Local, read-only telemetry review. Prompts, responses, titles, thread IDs, commands, tool results, full paths, and secrets are excluded.",
         "",
         "## Period at a glance",
@@ -1447,12 +1474,12 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         f"- **Observed turns:** {human_int(current['turns'])} ({comparison_text(comparison['turns'])})",
         f"- **Local cumulative token change:** {human_int(current['token_delta'])} ({comparison_text(comparison['token_delta'])})",
         f"- **Tool calls:** {human_int(current['tool_calls'])} with {human_duration(current['tool_runtime_ms'])} observed runtime",
-        f"- **Project areas:** {human_int(current['project_areas'])} across {human_int(current['active_days'])} active days",
+        f"- **Project areas:** {human_int(current['project_areas'])} across {human_int(current['active_days'])} UTC calendar dates with observed activity",
         f"- **{compaction_label}:** {human_int(current['compactions'])}; **response retries:** {human_int(current['response_retries'])}",
     ]
     if current["tasks_completed"]:
         lines.append(
-            f"- **Deep task timing:** {human_int(current['tasks_completed'])} completed tasks; median {human_duration(current['median_task_runtime_ms'])}; median first token {human_duration(current['median_time_to_first_token_ms'])}"
+            f"- **Deep task timing:** {human_int(current['tasks_completed'])} completed {plural(current['tasks_completed'], 'task')}; median {human_duration(current['median_task_runtime_ms'])}; median first token {human_duration(current['median_time_to_first_token_ms'])}"
         )
 
     lines.extend(["", "### Thread sources", "", "| Source | Threads | Share |", "|---|---:|---:|"])
@@ -1501,6 +1528,14 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         )
     if not current["tools"]:
         lines.append("| unavailable | 0 | 0 | 0s | 0s | 0 | not measured |")
+    tool_names = {item["tool"] for item in current["tools"]}
+    if {"exec", "exec_command"}.issubset(tool_names):
+        lines.extend(
+            [
+                "",
+                "`exec` and `exec_command` are separate retained runtime labels in this build. One workflow can pass through both an outer orchestration layer and a nested command dispatch, so the rows are not automatically distinct user actions.",
+            ]
+        )
 
     surface = current["dynamic_tool_surface"]
     lines.extend(
@@ -1508,7 +1543,7 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             "",
             "### Available surface",
             "",
-            f"Dynamic-tool inventory was retained for **{human_int(surface['threads_with_inventory'])}** threads: **{human_int(surface['distinct_tools'])}** distinct tools, averaging **{surface['average_tools_per_thread']:.1f}** per inventoried thread.",
+            f"Dynamic-tool inventory was retained for **{human_int(surface['threads_with_inventory'])}** {plural(surface['threads_with_inventory'], 'thread')}: **{human_int(surface['distinct_tools'])}** distinct tools, averaging **{surface['average_tools_per_thread']:.1f}** per inventoried thread.",
         ]
     )
     if surface["top_namespaces"]:
@@ -1524,8 +1559,9 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             "",
             "## Skills and plugins",
             "",
-            f"- Skill metadata truncation events: **{human_int(skill_context['metadata_truncation_events'])}**",
-            f"- Largest observed skill catalog: **{human_int(skill_context['max_catalog_skills'])}**; most omitted from an initial catalog: **{human_int(skill_context['max_omitted_skills'])}**",
+            f"- Skill-list budget-pressure events: **{human_int(skill_context['metadata_truncation_events'])}**",
+            f"- Largest observed skill catalog: **{human_int(skill_context['max_catalog_skills'])}**; most descriptions shortened in one event: **{human_int(skill_context['max_truncated_descriptions'])}**; most skills omitted in one event: **{human_int(skill_context['max_omitted_skills'])}**",
+            "- Description shortening and whole-skill omission are separate signals; zero omitted skills can coexist with shortened descriptions.",
             f"- Shadow-selection observations: **{human_int(skill_context['shadow_selection_events'])}**. These are experimental selection signals, not confirmed skill invocations.",
         ]
     )
@@ -1582,6 +1618,7 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             "",
             f"- Rollout detail: **{report['rollout_detail'].get('status', 'unknown')}**.",
             f"- Log coverage: current {coverage_text(log_coverage['current'])}; previous {coverage_text(log_coverage['previous'])}; token baseline {coverage_text(log_coverage['token_baseline'])}.",
+            f"- Suppressed prior-period comparisons: **{join_words(suppressed_comparisons)}**.",
             "- State-derived thread counts come from the retained thread index; historical completeness is unknown.",
             "- Deep-only values are shown as not measured when rollout enrichment does not run.",
             "- Token changes are local cumulative telemetry deltas, not billing totals.",
@@ -1662,6 +1699,7 @@ def main(argv: list[str] | None = None) -> int:
         deep_status, deep_warnings = scan_rollouts(unique_candidates, current, previous)
         warnings.extend(deep_warnings)
     else:
+        required_guard_mib = max(1, math.ceil(candidate_bytes / (1024 * 1024)))
         deep_status = {
             "status": "skipped_size_guard",
             "files": len(unique_candidates),
@@ -1669,7 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
             "guard_bytes": guard_bytes,
         }
         warnings.append(
-            f"deep rollout enrichment skipped by the {human_bytes(guard_bytes)} automatic size guard because candidates total {human_bytes(candidate_bytes)}; use --deep to force it"
+            f"deep rollout enrichment skipped by the {human_bytes(guard_bytes)} automatic size guard because candidates total {human_bytes(candidate_bytes)}; rerun with --max-auto-rollout-mib {required_guard_mib} to approve this measured size while retaining a guard, or use --deep to ignore the guard"
         )
 
     deep_available = deep_status.get("status") == "scanned"

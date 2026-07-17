@@ -24,6 +24,8 @@ Current `codex` CLI output supplies a report-time plugin, MCP, and Apps feature 
 
 `--days N` creates two adjacent N-day windows ending at report generation time. The caller must select a lookback from 1 to 90 days. The current period is compared with the preceding period. A third preceding window supplies token baselines so the first current-period observation is less likely to absorb older thread history.
 
+The window is rolling rather than aligned to UTC midnight. An N-day window can therefore touch parts of up to N+1 UTC calendar dates; the report labels active dates accordingly.
+
 Threads may span both periods. Counts describe observed activity within each period rather than newly created threads.
 
 ## Coverage And Comparison
@@ -47,8 +49,9 @@ Thread counts come from the retained state index and remain a separate state-der
 - **Model switches:** Changes between successive observed turns in the same thread.
 - **Observed turn span:** Time between the first and last selected telemetry row for a turn. It can include tools, approvals, and idle gaps.
 - **Tool runtime:** Retained dispatch and handler duration for completed tool calls. Summed runtime can overlap across parallel threads and is not elapsed wall-clock time.
+- **Runtime tool layers:** Wrapper and nested dispatch layers can be retained under separate names, such as `exec` and `exec_command`. A workflow can contribute to both rows, so their counts are not automatically distinct user actions.
 - **Dynamic-tool surface:** Current retained tool inventory for active threads. Inventory does not prove per-turn attachment or invocation.
-- **Skill context pressure:** Runtime messages showing that the initial skill catalog or descriptions were shortened to fit the skills-list budget.
+- **Skill context pressure:** Runtime messages showing that descriptions were shortened or whole skills were omitted to fit the skills-list budget. These are separate signals; zero omissions can coexist with shortened descriptions.
 - **Shadow selection:** Experimental selection telemetry. It is not confirmed skill invocation.
 - **Plugin attribution:** A heuristic normalized-name match across currently enabled plugin IDs, observed tool names, deep `SKILL.md` reads, and dynamic namespaces. It is medium confidence when tool calls match and low confidence when only skill or inventory names match.
 - **Compaction:** Prefer explicit rollout `context_compacted` events when deep enrichment runs; otherwise report remote-compaction attempt telemetry.
@@ -58,6 +61,8 @@ Automatic-review turns remain visible but are separated from working-model reaso
 ## Deep Rollout Enrichment
 
 The automatic mode totals candidate rollout sizes first. It scans when the total is at or below 512 MiB and otherwise reports the skipped size guard. Change the guard with `--max-auto-rollout-mib` or force the scan with `--deep`.
+
+When automatic enrichment is skipped, the warning reports the minimum whole-MiB `--max-auto-rollout-mib N` value required for the measured candidates. Rerunning with that value is the guarded middle path: it approves the known size while still stopping if the candidate set grows. `--deep` ignores the guard entirely.
 
 The scan reads files backward and stops at the prior comparison boundary. It extracts only:
 
