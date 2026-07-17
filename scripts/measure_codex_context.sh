@@ -98,7 +98,7 @@ if command -v codex >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
 else
   echo "plugin state requires codex and jq"
 fi
-echo "note=plugin enablement does not prove its tools are attached to the model"
+echo "note=plugin enablement records current availability; model attachment remains unknown"
 
 echo
 echo "mcp_state:"
@@ -261,7 +261,7 @@ if [ -n "$token_output" ]; then
     print "last_utc=" $1 " thread_tail=" $2 " rows=" $3 " first_utc=" $4 " elapsed_s=" $5 \
       " cumulative_first=" $6 " cumulative_last=" $7 " delta=" $8 " delta_per_min=" $9
   }'
-  echo "note=deltas are local cumulative telemetry, not billing totals; negative values may indicate reset or compaction"
+  echo "note=deltas describe local cumulative telemetry; billing attribution remains unknown; negative values may indicate reset or compaction"
 else
   echo "none"
 fi
@@ -300,7 +300,7 @@ if [ -n "$latest_cache" ] && command -v jq >/dev/null 2>&1; then
     | [((.[0].connector_name // "unknown") | tostring | gsub("[\\t\\r\\n]"; " ")), length]
     | @tsv
   ' "$latest_cache" | sort -t $'\t' -k2,2nr || true
-  echo "note=cache inventory may be stale and does not prove current app enablement"
+  echo "note=cache inventory may be stale; current app enablement remains unknown"
 else
   echo "no cache inventory available"
 fi

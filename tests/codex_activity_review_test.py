@@ -57,7 +57,8 @@ class CodexActivityReviewTest(unittest.TestCase):
               cwd text,
               model text,
               reasoning_effort text,
-              thread_source text
+              thread_source text,
+              title text
             );
             create table thread_dynamic_tools (
               thread_id text not null,
@@ -72,7 +73,7 @@ class CodexActivityReviewTest(unittest.TestCase):
             """
         )
         connection.executemany(
-            "insert into threads values (?,?,?,?,?,?,?,?)",
+            "insert into threads values (?,?,?,?,?,?,?,?,?)",
             [
                 (
                     "thread-user-secret",
@@ -83,6 +84,7 @@ class CodexActivityReviewTest(unittest.TestCase):
                     "gpt-5.6-sol",
                     "max",
                     "user",
+                    "private thread title",
                 ),
                 (
                     "thread-subagent-secret",
@@ -93,6 +95,7 @@ class CodexActivityReviewTest(unittest.TestCase):
                     "gpt-5.6-terra",
                     "medium",
                     "subagent",
+                    "private subagent title",
                 ),
             ],
         )
@@ -198,6 +201,26 @@ class CodexActivityReviewTest(unittest.TestCase):
             f"{self.root}/skills/codex-hygiene/SKILL.md"
         )
         records = [
+            {
+                "timestamp": "2026-07-12T11:00:00Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "private user prompt"}],
+                },
+            },
+            {
+                "timestamp": "2026-07-12T11:00:00Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "private assistant response"}
+                    ],
+                },
+            },
             {
                 "timestamp": "2026-07-12T11:00:00Z",
                 "type": "turn_context",
@@ -323,6 +346,10 @@ esac
             "turn-current",
             "call-one",
             "do-not-print",
+            "private user prompt",
+            "private assistant response",
+            "private thread title",
+            "private subagent title",
             "private tool result",
             "private_test.sh",
             "/Users/example/secret",
@@ -348,8 +375,24 @@ esac
         self.assertIn("most descriptions shortened in one event: **100**", result.stdout)
         self.assertIn("most skills omitted in one event: **0**", result.stdout)
         self.assertIn("zero omitted skills can coexist with shortened descriptions", result.stdout)
-        self.assertNotIn(str(self.root), result.stdout)
-        self.assertNotIn("private tool result", result.stdout)
+        self.assertIn("Prompts, responses, titles, thread IDs", result.stdout)
+        self.assertIn("stay private", result.stdout)
+        self.assertNotIn("Questions raised by the review", result.stdout)
+        for private_value in (
+            str(self.root),
+            "private user prompt",
+            "private assistant response",
+            "private thread title",
+            "private subagent title",
+            "thread-user-secret",
+            "turn-current",
+            "call-one",
+            "private_test.sh",
+            "private tool result",
+            "do-not-print",
+            "/Users/example/secret",
+        ):
+            self.assertNotIn(private_value, result.stdout)
 
     def test_markdown_explains_nested_exec_runtime_labels(self) -> None:
         self._append_logs(
@@ -368,7 +411,7 @@ esac
             "`exec` and `exec_command` are separate retained runtime labels",
             result.stdout,
         )
-        self.assertIn("not automatically distinct user actions", result.stdout)
+        self.assertIn("The count of distinct user actions remains unknown", result.stdout)
 
     def test_no_rollouts_keeps_core_report_available(self) -> None:
         result = self.run_report("--no-rollouts", "--format", "json")
@@ -422,7 +465,7 @@ esac
             self.assertIsNone(report["comparison"][key]["change"])
             self.assertIsNone(report["comparison"][key]["change_percent"])
         self.assertTrue(
-            any("log retention" in warning for warning in report["warnings"])
+            any("full retained log coverage" in warning for warning in report["warnings"])
         )
 
     def test_full_log_retention_allows_comparisons(self) -> None:
@@ -504,7 +547,8 @@ esac
         self.assertIsNone(report["current"]["tasks_completed"])
         self.assertIsNone(report["current"]["skill_reads"])
         self.assertIsNone(report["current"]["serialized_tool_output_bytes"])
-        self.assertTrue(any("automatic size guard" in item for item in report["warnings"]))
+        self.assertTrue(any("disk-work threshold" in item for item in report["warnings"]))
+        self.assertTrue(any("core SQLite review is available" in item for item in report["warnings"]))
         self.assertTrue(
             any("--max-auto-rollout-mib 3" in item for item in report["warnings"])
         )

@@ -22,22 +22,22 @@ Disable a selected connector with the current documented per-app setting:
 enabled = false
 ```
 
-Per-tool controls are also available when the build supports them. Verify the result against fresh-thread tool-list rows instead of assuming that an approval or enablement setting changed the model-visible surface.
+Per-tool controls are also available when the build supports them. Fresh-thread tool-list rows verify the resulting model-visible surface.
 
-Disable the complete Apps/connectors surface only when that is the intended scope:
+Use the complete Apps/connectors switch for an intended full-surface disable:
 
 ```toml
 [features]
 apps = false
 ```
 
-On one July 2026 Desktop setup, per-app values were parsed but the fresh `codex_apps` tool count remained around `166-167` until the global feature was disabled. Treat that as version-specific local evidence. First use current documented controls, then use the global switch when all Apps should be off or measurement confirms the narrower control is ineffective on that build.
+Observed fallback: on one July 2026 Desktop build, per-app values were accepted while fresh `codex_apps` tool counts remained around 166 to 167. The global feature switch removed the Apps surface. Treat this as version-specific local evidence and verify the result on a fresh thread.
 
-Cached app-tool files are inventory, not enabled-state evidence. Record their modification time and compare it with the measurement window.
+Cached app-tool files describe inventory. Current enablement needs fresh evidence. Record the cache modification time and compare it with the measurement window.
 
 ## MCP Controls
 
-Use existing local command, path, URL, and environment-variable names. Do not invent plugin cache paths or credentials.
+Use the existing local command, path, URL, and environment-variable names. Keep plugin cache paths and credentials grounded in the user's configuration.
 
 ```toml
 [mcp_servers.github]
@@ -50,46 +50,34 @@ url = "https://developers.openai.com/mcp"
 enabled = false
 ```
 
-For local or plugin MCPs, preserve existing `command`, `args`, `cwd`, and `url` fields; change only the `enabled` value unless another edit is required and approved.
+For local or plugin MCPs, preserve existing `command`, `args`, `cwd`, and `url` fields. A change to any other field requires a measured reason and approval.
 
-Common candidates when unused include:
-
-- `codex-security`
-- `computer-use`
-- `event-stream`
-- `xcodebuildmcp`
-- `github`
-- `openaiDeveloperDocs`
-
-An enabled plugin can contribute skills or other capabilities without attaching an MCP tool surface. Keep plugin installation state, MCP state, and model-visible tool rows separate in the diagnosis.
+An enabled plugin can contribute skills or other capabilities. Diagnose plugin installation state, MCP state, and model-visible tool rows as separate signals.
 
 ## Subagents And Automations
 
-Use these only when telemetry or config review shows background or parallel fan-out:
+Use these after telemetry or config review shows background or parallel fan-out:
 
 - Lower broad `agents.max_threads` when high fan-out is unnecessary.
-- Pause or narrow high-reasoning automations that are not currently useful.
-- Prefer bounded subagent assignments over banning subagents.
-- Prefer in-thread narrowing before archiving, forking, or replacing a long-running goal.
+- Pause or narrow high-reasoning automations with no recent relevant activity.
+- Give subagents bounded assignments tied to the current work.
+- Narrow the active thread first. Archive, fork, or replace a long-running goal with user approval.
 
 ## Project-Local MCP
 
-When a service is needed only in specific repositories, use a trusted repo's `<repo>/.codex/config.toml`:
+Place repository-specific services in a trusted repo's `<repo>/.codex/config.toml`:
 
 ```toml
 [mcp_servers.supabase]
 command = "/absolute/path/to/supabase-mcp"
 args = ["--project-ref=<project-ref>"]
-
-[sandbox_workspace_write]
-network_access = true
 ```
 
-Do not print service-role keys, access tokens, or full `.env` contents. Confirm that the project is trusted because Codex skips project-scoped configuration for untrusted projects.
+Keep service-role keys, access tokens, and full `.env` contents private. Confirm that the project is trusted because Codex skips project-scoped configuration for untrusted projects.
 
 ## Stale Project Stanzas
 
-Count without printing paths:
+Count while keeping paths private:
 
 ```bash
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
@@ -98,7 +86,7 @@ rg -o '^\[projects\."([^"]+)"\]' -r '$1' "$CODEX_HOME_DIR/config.toml" \
   | wc -l
 ```
 
-Remove only confirmed stale stanzas after backup. Do not print the complete missing-path list unless the user asks.
+Remove confirmed stale stanzas after backup and explicit approval. Report the count, and keep the complete missing-path list private unless the user asks for it.
 
 ## Fresh Measurement
 
@@ -114,4 +102,4 @@ Then run:
 "<skill-directory>/scripts/measure_codex_context.sh" 5 <fresh_thread_id>
 ```
 
-Compare tool-list rows, distinct thread counts, snapshot flags, per-thread cumulative token deltas, and cache age. Treat the telemetry as diagnostic evidence rather than billing totals.
+Compare tool-list rows, distinct thread counts, snapshot flags, per-thread cumulative token deltas, and cache age. The telemetry provides diagnostic evidence. Billing attribution remains unknown.

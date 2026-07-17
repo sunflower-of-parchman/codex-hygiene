@@ -106,6 +106,7 @@ assert_not_contains() {
 }
 
 assert_contains "installed=2 enabled=1 disabled=1"
+assert_contains "note=plugin enablement records current availability; model attachment remains unknown"
 assert_contains "enabled=1 names=alpha"
 assert_contains "disabled=1 names=beta"
 assert_contains "project_stanzas=2 missing_dirs=1"
@@ -115,10 +116,11 @@ assert_contains "thread_tail=thread-a rows=2"
 assert_contains "elapsed_s=60 cumulative_first=100 cumulative_last=160 delta=60 delta_per_min=60.0"
 assert_contains "thread_tail=thread-b rows=2"
 assert_contains "elapsed_s=30 cumulative_first=200 cumulative_last=260 delta=60 delta_per_min=120.0"
+assert_contains "note=deltas describe local cumulative telemetry; billing attribution remains unknown; negative values may indicate reset or compaction"
 assert_contains $'Alpha\t2'
 assert_contains $'Beta\t1'
 assert_contains "older_than_window=false"
-assert_contains "note=cache inventory may be stale and does not prove current app enablement"
+assert_contains "note=cache inventory may be stale; current app enablement remains unknown"
 assert_not_contains "connector-alpha-id"
 assert_not_contains "connector-beta-id"
 

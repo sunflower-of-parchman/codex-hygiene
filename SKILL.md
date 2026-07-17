@@ -1,16 +1,16 @@
 ---
 name: codex-hygiene
-description: Audit Codex Desktop context, tool surfaces, and work patterns with privacy-preserving local telemetry. Use when usage rises unexpectedly; models, reasoning levels, tools, skills, plugins, compactions, subagents, or automations need attribution; or someone wants a retrospective across a specified period.
+description: Audit Codex Desktop context, tool surfaces, and local activity with privacy-preserving telemetry. Use for compact setup diagnostics, unexpected usage, or a retrospective over a specified period.
 ---
 
 # Codex Hygiene
 
-Audit first, distinguish observed evidence from interpretation, and make reversible changes only when the user asks. Keep required evidence and capabilities available.
+Measure first. Separate observed evidence, interpretation, and unknowns. Keep inspection local and read-only until the user approves a change.
 
 ## Choose The Review
 
-- When the request does not specify a lookback period or retrospective, run the compact measurement. This preserves the original default behavior.
-- For reflection across a specified period or comparison with the preceding period, run the activity review.
+- Use the compact measurement for current-context diagnostics and requests that omit a retrospective period. This is the original default.
+- Use the activity review for a specified period or comparison with the preceding period.
 
 ## Compact Measurement
 
@@ -22,7 +22,7 @@ Audit first, distinguish observed evidence from interpretation, and make reversi
 "<skill-directory>/scripts/measure_codex_context.sh" 5 <thread_id>
 ```
 
-3. Classify the strongest measured contributor:
+3. Classify the measured contributors and lead with the clearest one:
    - large `codex_apps` tool surface
    - enabled unused MCPs or plugins
    - repeated tool-list or uncached snapshot rows
@@ -47,50 +47,52 @@ Use JSON for another local interface or deterministic processing:
 python3 "<skill-directory>/scripts/codex_activity_review.py" --days 14 --format json
 ```
 
-The default report uses read-only SQLite telemetry and automatically enriches from rollout files only when their combined size is below the safety guard. Force the deeper local scan when exact task timing, relative serialized tool-output weight, verification-command counts, and observed `SKILL.md` reads are worth the additional disk work:
+The core review uses read-only SQLite telemetry. This lightweight path remains available at every candidate rollout size.
+
+An optional rollout scan adds exact task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads. Before scanning, the script totals the candidate files. The 512 MiB default is a disk-work threshold for this optional pass.
+
+Candidate sets within the threshold receive rollout detail automatically. Larger sets receive the core report, `not measured` labels for rollout-derived fields, and an exact `--max-auto-rollout-mib N` rerun. Use `--deep` to authorize the optional scan at any measured size:
 
 ```bash
 python3 "<skill-directory>/scripts/codex_activity_review.py" --days 30 --deep
 ```
 
-When the guard skips enrichment, use the exact `--max-auto-rollout-mib N` value reported in the warning to approve that measured candidate size while retaining a ceiling. Use `--deep` only when the caller wants to ignore the ceiling.
-
-Read [activity-review.md](references/activity-review.md) when interpreting fields, confidence, comparison windows, or the deep-scan boundary.
+Read [activity-review.md](references/activity-review.md) for field definitions, confidence, comparison windows, and the optional rollout boundary.
 
 ## Interpret Signals Carefully
 
-- Tool-list and snapshot rows describe context/tool assembly, not actual tool calls.
-- Plugin enablement does not prove that plugin tools were attached to the model.
-- Cached app inventory can be stale and does not prove current app enablement.
-- Per-thread token deltas are local cumulative telemetry, not billing totals.
-- Check source coverage before comparing periods; partial or unavailable log windows are not valid zero baselines.
-- End-to-end turn and task spans include tool work and are not pure model inference time.
+- Tool-list and snapshot rows describe context and tool assembly. Retained tool-call events describe observed use.
+- Plugin enablement records current availability. Historical model attachment remains unknown.
+- Cached app inventory can be stale. Current enablement needs fresh evidence.
+- Per-thread token deltas describe local cumulative telemetry. Billing attribution remains unknown.
+- Period comparisons require full source coverage. Partial and unavailable windows carry an unavailable comparison state.
+- End-to-end turn and task spans include tool work. Model inference time remains unknown.
 - Summed task runtime can overlap across concurrent work and exceed wall-clock time.
-- Serialized rollout bytes are a relative output-weight signal, not model tokens.
-- Treat rollout-derived values as not measured when enrichment does not run; reserve zero for a completed scan with no observations.
+- Serialized rollout bytes provide a relative output-weight signal. Their relationship to model tokens remains unknown.
+- Rollout-derived values carry `not measured` when the optional scan has not run. Zero belongs to a completed scan with no observations.
 - Skill metadata selection, `SKILL.md` reads, and confirmed skill invocation are different signals.
 - Treat internal SQLite schemas and cache layouts as version-dependent.
 
 ## Guardrails
 
 - Use `sqlite3 -readonly` for Codex databases.
-- Do not dump full logs, config, app or MCP schemas, secrets, `.env` values, or complete missing-path lists.
-- Do not print prompts, responses, thread titles, thread IDs, commands, tool results, or full paths in an activity report.
-- Do not delete logs, caches, config, worktrees, or project directories as a first response.
-- Do not disable surfaces without explicit user approval or a clear prior preference.
-- Preserve small required helpers unless the user asks to remove them. Common examples are `node_repl` and `openai-api-key-local-confirmation`.
+- Keep full logs, config, app and MCP schemas, secrets, `.env` values, and complete missing-path lists private.
+- Keep prompts, responses, thread titles, thread IDs, commands, tool results, and full paths out of activity reports.
+- Preserve logs, caches, config, worktrees, and project directories during diagnosis.
+- Require explicit user approval or a clear prior preference before disabling surfaces.
+- Preserve small helpers required by current work or local instructions unless the user asks to remove them.
 - Prefer local `git` and `gh` for ordinary commits, rebases, merges, and pushes when PR, issue, review, CI artifact, or remote API tools are unnecessary.
 
 ## App Controls
 
-Use current documented per-app controls when only selected connectors should be disabled:
+Use current documented per-app controls for selected connectors:
 
 ```toml
 [apps."connector-id"]
 enabled = false
 ```
 
-Use the global switch only when the user wants all Apps/connectors unavailable or fresh measurement shows that per-app controls do not shrink the surface on that local build:
+Use the global switch when the user wants all Apps/connectors unavailable or fresh measurement shows an unchanged surface after the per-app setting:
 
 ```toml
 [features]
@@ -101,12 +103,12 @@ Verify either change against fresh-thread `list_all_tools` rows. See the [remedi
 
 ## Long-Running Goals
 
-Do not treat a valuable long-running goal as the problem by default. Separate:
+Start long-running goal analysis by separating:
 
 - runtime-managed resume, compaction, system, or tool context that may already be attached
 - agent-chosen rereading of old rollouts, transcripts, broad plugin docs, or unrelated evidence
 
-A narrowing prompt can stop unnecessary agent-chosen reads; it cannot guarantee that runtime-managed context was removed. Compare with a fresh tiny measurement thread when attribution matters, while preserving the active goal unless the user approves a fork, archive, reset, or replacement.
+A narrowing prompt limits agent-chosen reads. A fresh tiny measurement thread helps estimate runtime-managed context. Preserve the active goal unless the user approves a fork, archive, reset, or replacement.
 
 Read the [long-thread reference](references/long-thread-replay.md) when the goal must stay alive or final analysis quality must remain high.
 
@@ -121,7 +123,7 @@ Please reply exactly: OK
 Then rerun the five-minute measurement with that thread id. Good signs include:
 
 - no `codex_apps` rows when Apps are globally disabled
-- only intentionally available MCPs in `list_all_tools`
+- a `list_all_tools` MCP set that matches the intended availability
 - fewer or explainable snapshot rows
 - lower per-thread cumulative deltas, or a remaining floor attributable to base, system, tool, or thread context
 

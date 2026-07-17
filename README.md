@@ -1,25 +1,16 @@
 # Codex Hygiene
 
-A compact Codex skill for auditing Codex Desktop context and tool surfaces, with an optional privacy-preserving review of local work patterns over time.
+A compact, read-only Codex skill for current-context diagnostics and private local activity reviews.
 
-Use it for compact diagnostics or a privacy-preserving activity review of observed models, reasoning levels, tools, skills, plugins, compactions, subagents, automations, and token changes.
-
-Community skill for local Codex setup hygiene.
-
-The compact measurement remains the default when no lookback period or retrospective is requested. The activity review is an additive mode; existing measurement commands and output remain unchanged.
+The original measurement returns small counts from recent telemetry. An explicit 1-90 day review returns Markdown or JSON that describes how Codex was used, which sources support the report, and where the evidence ends.
 
 ## What It Does
 
-- Measures recent Codex Desktop tool-list and per-thread token telemetry with read-only SQLite queries.
-- Generates a Markdown or JSON review for a caller-selected lookback window, with comparison to the preceding period.
-- Reports retained-source coverage and suppresses comparisons when logs do not cover both periods.
-- Separates working-model observations from automatic-review activity and identifies user-thread turns when retained state supports it.
-- Measures observed tool-call runtime and, in deep mode, task timing, serialized output weight, verification commands, and `SKILL.md` reads.
-- Helps identify whether elevated usage correlates with app surface size, MCP/plugin state, snapshot reuse, stale project stanzas, long-thread replay, or background fan-out.
-- Distinguishes actual tool calls from tool availability, enabled state from cached inventory, and thread-local token changes from mixed-thread totals.
-- Labels attribution as observed evidence, interpretation, and unknowns.
-- Suggests reversible hygiene steps instead of deleting logs, caches, or projects.
-- Keeps long-running goal work quality-aware: narrow replay and tool scope without blindly lowering reasoning, banning subagents, or avoiding real source evidence.
+- Runs the original compact measurement for recent tool-list and per-thread token telemetry.
+- Builds a period review with source coverage and supported prior-window comparisons.
+- Separates observed evidence, interpretation, and unknowns.
+- Adds optional rollout detail for task timing, relative output weight, verification commands, explicit compactions, and observed `SKILL.md` reads.
+- Suggests scoped, reversible hygiene steps after measurement.
 
 ## Install
 
@@ -31,7 +22,7 @@ git clone https://github.com/sunflower-of-parchman/codex-hygiene.git \
   "$HOME/.agents/skills/codex-hygiene"
 ```
 
-Then invoke `$codex-hygiene`. Codex normally detects newly installed skills automatically; restart Codex only if it does not appear.
+Then invoke `$codex-hygiene`. Codex usually detects newly installed skills automatically. Restart Codex if the skill has not appeared.
 
 ## Quick Measurement
 
@@ -50,7 +41,7 @@ Use a specific window or thread id:
 "$SKILL_DIR/scripts/measure_codex_context.sh" 5 <thread_id>
 ```
 
-The script prints compact counts only. It does not dump full logs, configs, tool schemas, secrets, or environment values.
+The script prints compact counts. Full logs, configs, tool schemas, secrets, and environment values stay private.
 
 ## Activity Review
 
@@ -67,31 +58,66 @@ Use any other window or generate machine-readable output:
 python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 14 --format json
 ```
 
-The standard report stays on compact SQLite telemetry. It automatically enriches from recent rollout records when their total size is below a safety guard. Use `--deep` to force the additional read-only scan for exact task timing, relative serialized tool-output weight, verification-command counts, and observed `SKILL.md` reads:
+The core review reads compact SQLite telemetry. This is the lightweight path, and it remains available at every candidate rollout size.
+
+An optional rollout scan adds exact task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads. Before scanning, the script totals the candidate files. The 512 MiB default is a disk-work threshold for this optional pass. It keeps the first run lightweight and leaves the core report and selected review window intact.
+
+Candidate sets within the threshold receive the rollout detail automatically. Larger sets receive the core report, `not measured` labels for rollout-derived fields, and an exact guarded rerun command. Use `--deep` to authorize the optional scan at any measured size:
 
 ```bash
 python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 30 --deep
 ```
 
-When the automatic guard skips enrichment, the warning reports an exact `--max-auto-rollout-mib N` rerun. That option approves the measured candidate size while retaining a ceiling; `--deep` ignores the ceiling.
+Each report keeps prompts, responses, thread titles and IDs, commands, tool results, full paths, and secrets private. Token changes describe local cumulative telemetry. Billing attribution remains unknown. Task duration includes tool work and may overlap across concurrent tasks.
 
-The report excludes prompts, responses, thread titles and IDs, commands, tool results, full paths, and secrets. Token changes are diagnostic local deltas rather than billing totals, and task duration includes tool work. Rollout-derived fields say `not measured` when enrichment does not run; they are never presented as measured zeros.
+## Example Return
+
+The values below are synthetic. A Markdown activity review contains sections like these:
+
+```markdown
+# Codex Activity Review
+
+Window: `2026-07-10T12:00:00Z` through `2026-07-17T12:00:00Z`
+
+## Period at a glance
+
+- **Threads active:** 12; **prior-window change:** +2 (+20.0%)
+- **Observed turns:** 48 (prior comparison unavailable)
+- **Local cumulative token change:** 124,000 (prior comparison unavailable)
+- **Tool calls:** 96 with 6m 12s observed runtime
+
+## Attribution findings
+
+### 1. High confidence
+
+- **Observed:** `exec_command` had the largest observed tool runtime: 3m 41s across 38 calls.
+- **Interpretation:** The retained telemetry associates the runtime shown above with this tool.
+- **Unknown:** Prompt-schema tokens, result tokens, and the value of the returned evidence remain unknown.
+
+## Coverage and uncertainty
+
+- Rollout detail: **skipped_size_guard**.
+- Log coverage: current **full**; previous **partial**; token baseline **unavailable**.
+- Suppressed prior-period comparisons: **observed turns, local cumulative token change, tool calls, and tool runtime**.
+```
+
+This is an excerpt. The complete report includes every measured section and its source warnings.
 
 ## Compatibility
 
-- Designed for macOS and Unix-like Codex Desktop environments with Bash, `sqlite3`, Perl, `awk`, and `sort`.
-- Uses `jq` and the `codex` CLI when available for app-cache and plugin state summaries.
-- The activity review uses Python 3 and only the standard library.
-- Treats local telemetry databases and cache layouts as version-dependent diagnostic inputs, not stable APIs or billing records.
-- Supports custom Codex data locations through `CODEX_HOME`; use the skill's actual install path when it is not under `$HOME/.agents/skills`.
+- The compact measurement supports macOS and Unix-like Codex Desktop environments with Bash, `sqlite3`, Perl, `awk`, and `sort`.
+- `jq` and the `codex` CLI add app-cache and current plugin-state summaries when available.
+- The activity review uses Python 3 and the standard library.
+- Local telemetry schemas, retained history, cache layouts, and CLI output are version-dependent diagnostic inputs.
+- `CODEX_HOME` supports custom Codex data locations. Commands should use the skill's actual install path.
 
 ## Safety Defaults
 
-- Starts read-only.
+- Starts every measurement read-only.
 - Uses `sqlite3 -readonly`.
-- Avoids printing full config, full logs, app schemas, MCP schemas, or `.env` values.
+- Keeps full config, full logs, app schemas, MCP schemas, and `.env` values private.
 - Recommends backing up `~/.codex/config.toml` before any config edit.
-- Treats delete/restart/disable actions as explicit-user-approval work.
+- Requires explicit user approval for delete, restart, disable, and configuration actions.
 
 ## Contents
 

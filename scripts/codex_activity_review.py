@@ -81,7 +81,7 @@ COMPARISON_LABELS = (
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a local Codex activity review without printing prompts or paths."
+        description="Create a local Codex activity review that keeps prompts and paths private."
     )
     parser.add_argument(
         "--days", type=int, required=True, help="Lookback window in days (1-90)."
@@ -102,18 +102,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     rollout_group.add_argument(
         "--deep",
         action="store_true",
-        help="Force a bounded reverse scan of recent rollout records for task timing, output weight, and skill-read evidence.",
+        help="Authorize a bounded reverse scan of recent rollout records for task timing, output weight, and skill-read evidence.",
     )
     rollout_group.add_argument(
         "--no-rollouts",
         action="store_true",
-        help="Skip rollout enrichment and use compact SQLite telemetry only.",
+        help="Return the lightweight SQLite review and mark rollout-derived fields as not measured.",
     )
     parser.add_argument(
         "--max-auto-rollout-mib",
         type=int,
         default=512,
-        help="Automatic rollout scan size guard in MiB (default: 512).",
+        help="Disk-work threshold for the automatic optional rollout scan in MiB (default: 512).",
     )
     parser.add_argument("--top", type=int, default=8, help="Maximum rows in ranked sections.")
     args = parser.parse_args(argv)
@@ -1173,8 +1173,8 @@ def build_findings(
             {
                 "confidence": "high",
                 "observed": f"Subagent threads represented {percent(subagents, current['threads']):.1f}% of {current['threads']} active threads.",
-                "interpretation": "Delegated agent work was a material part of the selected period's activity." if subagents else "No subagent thread activity was observed in the retained state records.",
-                "unknown": "Thread count does not measure whether the delegated work improved quality or completion time.",
+                "interpretation": "Delegated work accounted for the observed share above." if subagents else "Retained state showed zero subagent thread activity.",
+                "unknown": "The effect on quality and completion time remains unknown.",
             }
         )
 
@@ -1187,8 +1187,8 @@ def build_findings(
             {
                 "confidence": "high",
                 "observed": f"{top_model['model']} was associated with {human_int(top_model['token_delta'])} positive cumulative tokens in retained log coverage, {percent(top_model['token_delta'], current['token_delta']):.1f}% of the measured change.",
-                "interpretation": "This was the largest observed model-associated token-change contributor in the retained telemetry.",
-                "unknown": "The delta excludes unobserved first baselines, is not a billing total, and does not measure the value or difficulty of the work.",
+                "interpretation": "The retained telemetry associates this portion of the measured change with that model label.",
+                "unknown": "Billing attribution, work value, work difficulty, and activity before the first retained baseline remain unknown.",
             }
         )
 
@@ -1201,8 +1201,8 @@ def build_findings(
             {
                 "confidence": "high",
                 "observed": f"{top_tool['tool']} had the largest observed tool runtime in retained log coverage: {human_duration(top_tool['runtime_ms'])} across {top_tool['calls']} {plural(top_tool['calls'], 'call')}.{automatic_note}",
-                "interpretation": "It was the strongest measured tool-runtime contributor in this window.",
-                "unknown": "Tool runtime does not isolate prompt-schema tokens, result tokens, or the value of the returned evidence.",
+                "interpretation": "The retained telemetry associates the runtime shown above with this tool.",
+                "unknown": "Prompt-schema tokens, result tokens, and the value of the returned evidence remain unknown.",
             }
         )
 
@@ -1218,7 +1218,7 @@ def build_findings(
                 "confidence": "high",
                 "observed": f"Skill-list budget pressure appeared in {skill_context['metadata_truncation_events']} observed context-build events; as many as {skill_context['max_truncated_descriptions']} skill descriptions were shortened, and {omitted_detail}.",
                 "interpretation": "The runtime shortened descriptions or omitted entries to fit its initial skills-list budget during part of the selected period.",
-                "unknown": "This does not show that omitted skills, included skills, or full SKILL.md files were invoked.",
+                "unknown": "Invocation status for omitted skills, included skills, and full SKILL.md files remains unknown.",
             }
         )
 
@@ -1228,8 +1228,8 @@ def build_findings(
             {
                 "confidence": "medium",
                 "observed": f"Dynamic-tool inventories covered {surface['threads_with_inventory']} {plural(surface['threads_with_inventory'], 'thread')} with an average of {surface['average_tools_per_thread']:.1f} tools and {surface['distinct_tools']} distinct tool names.",
-                "interpretation": "This is the best retained measure of model-visible dynamic tool breadth for those threads.",
-                "unknown": "Inventory rows do not prove that each tool schema was sent on every turn or that any listed tool was called.",
+                "interpretation": "This describes retained dynamic tool breadth for those threads.",
+                "unknown": "Per-turn schema attachment and invocation remain unknown.",
             }
         )
 
@@ -1244,8 +1244,8 @@ def build_findings(
                 "At least one thread reached a context-management boundary during the selected period."
             )
             compaction_unknown = (
-                "Compaction alone does not identify whether growth came from conversation history, "
-                "tool schemas, tool output, or source evidence."
+                "The source of context growth remains unknown. Candidates include conversation history, "
+                "tool schemas, tool output, and source evidence."
             )
         else:
             verb = "was" if current["compactions"] == 1 else "were"
@@ -1256,7 +1256,7 @@ def build_findings(
                 "At least one thread attempted context management during retained log coverage."
             )
             compaction_unknown = (
-                "Attempt telemetry does not prove that compaction completed or identify what caused growth."
+                "Completion status and the source of context growth remain unknown."
             )
         findings.append(
             {
@@ -1271,9 +1271,9 @@ def build_findings(
         findings.append(
             {
                 "confidence": "medium",
-                "observed": f"The deep scan associated {human_bytes(current['serialized_tool_output_bytes'])} of serialized rollout records with tool outputs.",
+                "observed": f"The optional rollout scan associated {human_bytes(current['serialized_tool_output_bytes'])} of serialized rollout records with tool outputs.",
                 "interpretation": "This provides a relative output-weight signal across observed tools.",
-                "unknown": "Serialized bytes are not model tokens and may include encoding or protocol overhead.",
+                "unknown": "These bytes may include encoding or protocol overhead. Their relationship to model tokens remains unknown.",
             }
         )
 
@@ -1283,8 +1283,8 @@ def build_findings(
             {
                 "confidence": "high",
                 "observed": f"The report-time plugin snapshot contained {plugins.get('enabled', 0)} enabled and {plugins.get('disabled', 0)} disabled plugins.",
-                "interpretation": "This records current availability for comparison with observed tool and skill surfaces.",
-                "unknown": "Current enablement does not prove enablement or model attachment throughout the selected period.",
+                "interpretation": "This snapshot can be read alongside observed tool and skill activity.",
+                "unknown": "Historical enablement and model attachment remain unknown.",
             }
         )
     if plugin_attribution:
@@ -1298,8 +1298,8 @@ def build_findings(
             {
                 "confidence": top_plugin["confidence"],
                 "observed": f"Name matching associated {top_plugin['plugin']} with {top_plugin['matched_tool_calls']} {plural(top_plugin['matched_tool_calls'], 'tool call')}, {human_duration(top_plugin['matched_tool_runtime_ms'])} of tool runtime, and {skill_read_text}.",
-                "interpretation": "This is the strongest plugin-associated activity signal available from current names and retained events.",
-                "unknown": "The runtime does not retain a stable historical plugin-to-tool-to-skill attribution table, so name matches can miss or misclassify relationships.",
+                "interpretation": "Matching names connects this plugin snapshot to retained tool and skill activity.",
+                "unknown": "A stable historical plugin-to-tool-to-skill mapping is unavailable. Name matching can miss or misclassify relationships.",
             }
         )
     return findings
@@ -1324,8 +1324,8 @@ def make_report(
         log_coverage.get("token_baseline", {}).get("status") == "full"
     )
     deep_available = deep_status.get("status") == "scanned"
-    log_reason = "log telemetry does not fully cover both adjacent windows"
-    token_reason = "log telemetry does not fully cover both windows and the token-baseline window"
+    log_reason = "full retained log coverage is unavailable for both adjacent windows"
+    token_reason = "full retained log coverage is unavailable for both windows and the token-baseline window"
     comparisons = {
         "threads": delta(current["threads"], previous["threads"], "state"),
         "turns": delta(
@@ -1364,11 +1364,11 @@ def make_report(
     report_warnings = list(warnings)
     if not logs_comparable:
         report_warnings.append(
-            "log retention does not fully cover both adjacent windows; log-derived comparisons are unavailable"
+            "full retained log coverage is unavailable for both adjacent windows; log-derived comparisons are unavailable"
         )
     elif not tokens_comparable:
         report_warnings.append(
-            "the token-baseline window is not fully retained; token-change comparison is unavailable"
+            "full retained coverage is unavailable for the token-baseline window; token-change comparison is unavailable"
         )
     coverage = {
         "state": {
@@ -1466,11 +1466,11 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         "",
         f"> This is a rolling {report['days']}-day ({report['days'] * 24}-hour) window, so observed activity can fall across parts of up to {report['days'] + 1} UTC calendar dates.",
         "",
-        "> Local, read-only telemetry review. Prompts, responses, titles, thread IDs, commands, tool results, full paths, and secrets are excluded.",
+        "> Local, read-only telemetry review. Prompts, responses, titles, thread IDs, commands, tool results, full paths, and secrets stay private.",
         "",
         "## Period at a glance",
         "",
-        f"- **Threads active:** {human_int(current['threads'])} ({comparison_text(comparison['threads'])} from the prior window)",
+        f"- **Threads active:** {human_int(current['threads'])}; **prior-window change:** {comparison_text(comparison['threads'])}",
         f"- **Observed turns:** {human_int(current['turns'])} ({comparison_text(comparison['turns'])})",
         f"- **Local cumulative token change:** {human_int(current['token_delta'])} ({comparison_text(comparison['token_delta'])})",
         f"- **Tool calls:** {human_int(current['tool_calls'])} with {human_duration(current['tool_runtime_ms'])} observed runtime",
@@ -1479,7 +1479,7 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
     ]
     if current["tasks_completed"]:
         lines.append(
-            f"- **Deep task timing:** {human_int(current['tasks_completed'])} completed {plural(current['tasks_completed'], 'task')}; median {human_duration(current['median_task_runtime_ms'])}; median first token {human_duration(current['median_time_to_first_token_ms'])}"
+            f"- **Rollout task timing:** {human_int(current['tasks_completed'])} completed {plural(current['tasks_completed'], 'task')}; median {human_duration(current['median_task_runtime_ms'])}; median first token {human_duration(current['median_time_to_first_token_ms'])}"
         )
 
     lines.extend(["", "### Thread sources", "", "| Source | Threads | Share |", "|---|---:|---:|"])
@@ -1491,9 +1491,9 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             "",
             "## Model and reasoning activity",
             "",
-            "Model timing below is observed end-to-end turn or task activity. It includes tool work, can overlap across concurrent tasks, and is not pure model inference time.",
+            "Model timing covers observed end-to-end turn or task activity, including tool work. Concurrent tasks can overlap. Model inference time remains unknown.",
             "",
-            "| Model | Category | Turns | User-thread turns | Token change | Deep task runtime | First observed | Last observed |",
+            "| Model | Category | Turns | User-thread turns | Token change | Rollout task runtime | First observed | Last observed |",
             "|---|---|---:|---:|---:|---:|---|---|",
         ]
     )
@@ -1510,7 +1510,7 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
     if not current["working_reasoning_efforts"]:
         lines.append("| unavailable | 0 |")
     lines.append(
-        f"\nAutomatic-review turns are separated from this table: **{human_int(current['automatic_review_turns'])}** observed. Model switches between turns: **{human_int(current['model_switches'])}**."
+        f"\nAutomatic-review turns in their own category: **{human_int(current['automatic_review_turns'])}** observed. Model switches between turns: **{human_int(current['model_switches'])}**."
     )
 
     lines.extend(
@@ -1533,7 +1533,7 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         lines.extend(
             [
                 "",
-                "`exec` and `exec_command` are separate retained runtime labels in this build. One workflow can pass through both an outer orchestration layer and a nested command dispatch, so the rows are not automatically distinct user actions.",
+                "`exec` and `exec_command` are separate retained runtime labels in this build. One workflow can contribute to both rows through an outer orchestration layer and a nested command dispatch. The count of distinct user actions remains unknown.",
             ]
         )
 
@@ -1562,20 +1562,20 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             f"- Skill-list budget-pressure events: **{human_int(skill_context['metadata_truncation_events'])}**",
             f"- Largest observed skill catalog: **{human_int(skill_context['max_catalog_skills'])}**; most descriptions shortened in one event: **{human_int(skill_context['max_truncated_descriptions'])}**; most skills omitted in one event: **{human_int(skill_context['max_omitted_skills'])}**",
             "- Description shortening and whole-skill omission are separate signals; zero omitted skills can coexist with shortened descriptions.",
-            f"- Shadow-selection observations: **{human_int(skill_context['shadow_selection_events'])}**. These are experimental selection signals, not confirmed skill invocations.",
+            f"- Shadow-selection observations: **{human_int(skill_context['shadow_selection_events'])}**. These are experimental selection signals. Confirmed skill invocation requires separate evidence.",
         ]
     )
     if current["skill_reads"] is None:
         lines.extend(["", "Observed `SKILL.md` reads: **not measured**."])
     elif current["skill_reads"]:
-        lines.extend(["", "Observed `SKILL.md` reads from the deep rollout scan:", "", "| Skill | Reads |", "|---|---:|"])
+        lines.extend(["", "Observed `SKILL.md` reads from the optional rollout scan:", "", "| Skill | Reads |", "|---|---:|"])
         for item in current["skill_reads"][:top]:
             lines.append(f"| {item['name']} | {human_int(item['value'])} |")
     else:
-        lines.extend(["", "Observed `SKILL.md` reads from the deep rollout scan: **0**."])
+        lines.extend(["", "Observed `SKILL.md` reads from the optional rollout scan: **0**."])
     plugins = report["report_time_snapshot"]["plugins"]
     lines.append(
-        f"\nReport-time plugin snapshot: **{human_int(plugins.get('enabled', 0))} enabled**, **{human_int(plugins.get('disabled', 0))} disabled**. Enablement does not prove model attachment or use during the selected period."
+        f"\nReport-time plugin snapshot: **{human_int(plugins.get('enabled', 0))} enabled**, **{human_int(plugins.get('disabled', 0))} disabled**. This is a current availability snapshot. Historical model attachment and use remain unknown."
     )
     if report["plugin_attribution"]:
         lines.extend(
@@ -1608,21 +1608,15 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
     log_coverage = report["coverage"]["logs"]
     lines.extend(
         [
-            "## Questions raised by the review",
-            "",
-            "- Which high-reasoning turns involved judgment that benefited from the additional depth?",
-            "- Which repeated tool calls produced evidence that materially changed the work?",
-            "- Which long or compacted threads should remain continuous, and which work naturally fits a fresh focused task?",
-            "",
             "## Coverage and uncertainty",
             "",
             f"- Rollout detail: **{report['rollout_detail'].get('status', 'unknown')}**.",
             f"- Log coverage: current {coverage_text(log_coverage['current'])}; previous {coverage_text(log_coverage['previous'])}; token baseline {coverage_text(log_coverage['token_baseline'])}.",
             f"- Suppressed prior-period comparisons: **{join_words(suppressed_comparisons)}**.",
             "- State-derived thread counts come from the retained thread index; historical completeness is unknown.",
-            "- Deep-only values are shown as not measured when rollout enrichment does not run.",
-            "- Token changes are local cumulative telemetry deltas, not billing totals.",
-            "- Tool and deep task runtimes can overlap across concurrent threads and do not measure schema or result tokens.",
+            "- Rollout-derived values carry the label `not measured` until the optional scan runs.",
+            "- Token changes describe local cumulative telemetry. Billing attribution remains unknown.",
+            "- Tool and rollout task runtimes can overlap across concurrent threads. Schema and result token counts remain unknown.",
             "- Plugin and MCP snapshots describe report-time configuration unless a timestamped event was observed.",
         ]
     )
@@ -1707,7 +1701,7 @@ def main(argv: list[str] | None = None) -> int:
             "guard_bytes": guard_bytes,
         }
         warnings.append(
-            f"deep rollout enrichment skipped by the {human_bytes(guard_bytes)} automatic size guard because candidates total {human_bytes(candidate_bytes)}; rerun with --max-auto-rollout-mib {required_guard_mib} to approve this measured size while retaining a guard, or use --deep to ignore the guard"
+            f"optional rollout scan skipped by the {human_bytes(guard_bytes)} disk-work threshold because candidates total {human_bytes(candidate_bytes)}; the core SQLite review is available; rerun with --max-auto-rollout-mib {required_guard_mib} for a guarded scan at the measured size, or use --deep to authorize the scan at any size"
         )
 
     deep_available = deep_status.get("status") == "scanned"
