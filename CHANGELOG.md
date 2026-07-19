@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+## [v0.3.0] - 2026-07-19
+
+### Added
+
+- A versionless social-preview image for the GitHub repository.
+
 ### Changed
 
-- Period reviews now run rollout enrichment by default at every candidate size; the 512 MiB automatic cutoff and guarded-rerun workflow were removed.
-- Reports now begin with the system-wide review scope and include all installed plugins, MCP state, Apps availability, project-stanza counts, richer model/token shares, and reasoning effort by model.
-- Plugin weight now reports each installed plugin across matched calls, runtime, serialized output, skill reads, and inventoried tools while keeping exact per-plugin context and billing tokens explicitly unknown.
-- Reports end with a concise optional prompt for asking Codex to identify evidence-based token-efficiency opportunities.
+- System-wide Codex activity reviews now run rollout enrichment by default at every candidate size; the 512 MiB automatic cutoff and guarded-rerun workflow were removed.
+- System-wide Codex activity reviews now report all installed plugins, MCP state, Apps availability, project-stanza counts, richer model/token shares, and reasoning effort by model.
+- Activity review language now clarifies plugin weight and privacy unknowns across matched calls, runtime, serialized output, skill reads, inventoried tools, per-plugin context, and billing tokens.
+- System-wide Codex activity reviews now end with an optional prompt for identifying evidence-based token-efficiency opportunities.
 
 ## [v0.2.0] - 2026-07-17
 
@@ -30,3 +36,4 @@
 - The activity review core uses compact SQLite telemetry. An optional rollout scan adds deeper fields. Its 512 MiB default disk-work threshold keeps the automatic pass lightweight; larger candidate sets receive the core report, `not measured` labels for rollout-derived fields, and an exact guarded rerun command.
 
 [v0.2.0]: https://github.com/sunflower-of-parchman/codex-hygiene/compare/v0.1.0...v0.2.0
+[v0.3.0]: https://github.com/sunflower-of-parchman/codex-hygiene/compare/v0.2.0...v0.3.0
