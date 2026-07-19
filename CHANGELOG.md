@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Period reviews now run rollout enrichment by default at every candidate size; the 512 MiB automatic cutoff and guarded-rerun workflow were removed.
+- Reports now begin with the system-wide review scope and include all installed plugins, MCP state, Apps availability, project-stanza counts, richer model/token shares, and reasoning effort by model.
+- Plugin weight now reports each installed plugin across matched calls, runtime, serialized output, skill reads, and inventoried tools while keeping exact per-plugin context and billing tokens explicitly unknown.
+- Reports end with a concise optional prompt for asking Codex to identify evidence-based token-efficiency opportunities.
+
 ## [v0.2.0] - 2026-07-17
 
 ### Added

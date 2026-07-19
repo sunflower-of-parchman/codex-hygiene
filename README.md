@@ -9,7 +9,8 @@ The original measurement returns small counts from recent telemetry. An explicit
 - Runs the original compact measurement for recent tool-list and per-thread token telemetry.
 - Builds a period review with source coverage and supported prior-window comparisons.
 - Separates observed evidence, interpretation, and unknowns.
-- Adds optional rollout detail for task timing, relative output weight, verification commands, explicit compactions, and observed `SKILL.md` reads.
+- Enriches period reviews with task timing, relative output weight, verification commands, explicit compactions, and observed `SKILL.md` reads.
+- Reviews the current Codex profile, including every installed plugin, MCP state, Apps availability, and project-stanza counts.
 - Suggests scoped, reversible hygiene steps after measurement.
 
 ## Install
@@ -58,14 +59,12 @@ Use any other window or generate machine-readable output:
 python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 14 --format json
 ```
 
-The core review reads compact SQLite telemetry. This is the lightweight path, and it remains available at every candidate rollout size.
+The review reads compact SQLite telemetry and enriches it from rollout records inside `CODEX_HOME`. Enrichment runs by default at every candidate size and reads files backward only to the prior comparison boundary. It adds task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads.
 
-An optional rollout scan adds exact task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads. Before scanning, the script totals the candidate files. The 512 MiB default is a disk-work threshold for this optional pass. It keeps the first run lightweight and leaves the core report and selected review window intact.
-
-Candidate sets within the threshold receive the rollout detail automatically. Larger sets receive the core report, `not measured` labels for rollout-derived fields, and an exact guarded rerun command. Use `--deep` to authorize the optional scan at any measured size:
+Use `--no-rollouts` only when a deliberately lightweight report is needed:
 
 ```bash
-python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 30 --deep
+python3 "$SKILL_DIR/scripts/codex_activity_review.py" --days 30 --no-rollouts
 ```
 
 Each report keeps prompts, responses, thread titles and IDs, commands, tool results, full paths, and secrets private. Token changes describe local cumulative telemetry. Billing attribution remains unknown. Task duration includes tool work and may overlap across concurrent tasks.
@@ -86,7 +85,13 @@ Window: `2026-07-10T12:00:00Z` through `2026-07-17T12:00:00Z`
 - **Local cumulative token change:** 124,000 (prior comparison unavailable)
 - **Tool calls:** 96 with 6m 12s observed runtime
 
-## Attribution findings
+## Codex profile and plugin weight
+
+| Plugin | State | Tool calls | Runtime | Serialized output | Skill reads |
+|---|---|---:|---:|---:|---:|
+| example@marketplace | enabled | 18 | 42s | 1.2 MiB | 3 |
+
+## Interpretation
 
 ### 1. High confidence
 
@@ -96,9 +101,15 @@ Window: `2026-07-10T12:00:00Z` through `2026-07-17T12:00:00Z`
 
 ## Coverage and uncertainty
 
-- Rollout detail: **skipped_size_guard**.
+- Rollout detail: **scanned**.
 - Log coverage: current **full**; previous **partial**; token baseline **unavailable**.
 - Suppressed prior-period comparisons: **observed turns, local cumulative token change, tool calls, and tool runtime**.
+```
+
+## Optional: Codex optimization
+
+```text
+Use this review to identify up to three ways to reduce unnecessary token use while preserving quality and required capabilities. Tie each suggestion to observed evidence, state uncertainty, and make no changes without approval.
 ```
 
 This is an excerpt. The complete report includes every measured section and its source warnings.

@@ -8,7 +8,6 @@ import collections
 import datetime as dt
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
@@ -21,7 +20,11 @@ from typing import Any, Iterable
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = "0.2.0"
+SCHEMA_VERSION = "0.3.0"
+CODEX_OPTIMIZATION_PROMPT = (
+    "Use this review to identify up to three ways to reduce unnecessary token use while preserving quality and required capabilities. "
+    "Tie each suggestion to observed evidence, state uncertainty, and make no changes without approval."
+)
 UTC = dt.timezone.utc
 SAFE_LABEL = re.compile(r"[^A-Za-z0-9._:@+-]+")
 TURN_ID_RE = re.compile(r"(?:turn\.id=|turn_id=)([A-Za-z0-9-]+)")
@@ -102,25 +105,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     rollout_group.add_argument(
         "--deep",
         action="store_true",
-        help="Authorize a bounded reverse scan of recent rollout records for task timing, output weight, and skill-read evidence.",
+        help=argparse.SUPPRESS,
     )
     rollout_group.add_argument(
         "--no-rollouts",
         action="store_true",
-        help="Return the lightweight SQLite review and mark rollout-derived fields as not measured.",
+        help="Skip rollout enrichment and mark rollout-derived fields as not measured.",
     )
-    parser.add_argument(
-        "--max-auto-rollout-mib",
-        type=int,
-        default=512,
-        help="Disk-work threshold for the automatic optional rollout scan in MiB (default: 512).",
-    )
-    parser.add_argument("--top", type=int, default=8, help="Maximum rows in ranked sections.")
+    parser.add_argument("--top", type=int, default=20, help="Maximum rows in ranked sections.")
     args = parser.parse_args(argv)
     if args.days < 1 or args.days > 90:
         parser.error("--days must be between 1 and 90")
-    if args.max_auto_rollout_mib < 1:
-        parser.error("--max-auto-rollout-mib must be positive")
     if args.top < 1 or args.top > 50:
         parser.error("--top must be between 1 and 50")
     return args
@@ -243,6 +238,8 @@ def empty_window(label: str, start: dt.datetime, end: dt.datetime) -> dict[str, 
         "token_delta": 0,
         "token_resets": 0,
         "tokens_by_model": collections.Counter(),
+        "tokens_by_effort": collections.Counter(),
+        "tokens_by_model_effort": collections.Counter(),
         "tool_calls": {},
         "tool_call_ids": set(),
         "compactions": 0,
@@ -488,6 +485,8 @@ def scan_logs(
                         if delta >= 0:
                             window["token_delta"] += delta
                             window["tokens_by_model"][model] += delta
+                            window["tokens_by_effort"][effort] += delta
+                            window["tokens_by_model_effort"][(model, effort)] += delta
                         else:
                             window["token_resets"] += 1
 
@@ -733,7 +732,13 @@ def capture_cli_snapshot(codex_home: Path) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "captured_at_report_time": True,
         "apps_feature": "unavailable",
-        "plugins": {"installed": 0, "enabled": 0, "disabled": 0, "enabled_ids": []},
+        "plugins": {
+            "installed": 0,
+            "enabled": 0,
+            "disabled": 0,
+            "enabled_ids": [],
+            "items": [],
+        },
         "mcp": {"enabled": [], "disabled": []},
         "projects": {"stanzas": 0, "missing_directories": 0},
     }
@@ -769,22 +774,28 @@ def capture_cli_snapshot(codex_home: Path) -> dict[str, Any]:
                 disabled_count = sum(
                     1 for item in installed if isinstance(item, dict) and item.get("enabled") is False
                 )
-                snapshot["plugins"] = {
-                    "installed": len(installed),
-                    "enabled": len(enabled_ids),
-                    "disabled": disabled_count,
-                    "enabled_ids": enabled_ids,
-                    "enabled_plugins": [
+                plugin_items = sorted(
+                    (
                         {
                             "id": safe_label(item.get("pluginId") or item.get("name")),
                             "name": safe_label(
                                 item.get("name")
                                 or str(item.get("pluginId") or "").split("@", 1)[0]
                             ),
+                            "version": safe_label(item.get("version"), "unknown"),
+                            "enabled": item.get("enabled") is True,
                         }
                         for item in installed
-                        if isinstance(item, dict) and item.get("enabled") is True
-                    ],
+                        if isinstance(item, dict)
+                    ),
+                    key=lambda item: (not item["enabled"], item["id"]),
+                )
+                snapshot["plugins"] = {
+                    "installed": len(installed),
+                    "enabled": len(enabled_ids),
+                    "disabled": disabled_count,
+                    "enabled_ids": enabled_ids,
+                    "items": plugin_items,
                 }
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
             pass
@@ -884,6 +895,7 @@ def finalize_window(
     model_turns: collections.Counter[str] = collections.Counter()
     effort_turns: collections.Counter[str] = collections.Counter()
     working_effort_turns: collections.Counter[str] = collections.Counter()
+    model_effort_turns: collections.Counter[tuple[str, str]] = collections.Counter()
     model_first: dict[str, int] = {}
     model_last: dict[str, int] = {}
     model_sources: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
@@ -894,6 +906,7 @@ def finalize_window(
         timestamp = int(turn["timestamp"])
         model_turns[model] += 1
         effort_turns[effort] += 1
+        model_effort_turns[(model, effort)] += 1
         if not model.startswith("codex-auto-review"):
             working_effort_turns[effort] += 1
         model_first[model] = min(model_first.get(model, timestamp), timestamp)
@@ -939,6 +952,24 @@ def finalize_window(
             }
         )
 
+    model_reasoning = []
+    all_model_efforts = set(model_effort_turns) | set(window["tokens_by_model_effort"])
+    for model, effort in sorted(
+        all_model_efforts,
+        key=lambda item: (-model_effort_turns[item], item[0], item[1]),
+    ):
+        model_reasoning.append(
+            {
+                "model": model,
+                "category": "automatic-review"
+                if model.startswith("codex-auto-review")
+                else "working-model",
+                "effort": effort,
+                "turns": int(model_effort_turns[(model, effort)]),
+                "token_delta": int(window["tokens_by_model_effort"][(model, effort)]),
+            }
+        )
+
     tools = []
     for name, values in window["tool_calls"].items():
         output_bytes = (
@@ -978,6 +1009,10 @@ def finalize_window(
     namespaces = dynamic_summary.get("namespaces", collections.Counter())
     all_skill_reads = ranked_counter(window["skill_reads"]) if deep_available else None
     all_namespaces = ranked_counter(namespaces)
+    working_tokens_by_effort: collections.Counter[str] = collections.Counter()
+    for (model, effort), token_delta in window["tokens_by_model_effort"].items():
+        if not model.startswith("codex-auto-review"):
+            working_tokens_by_effort[effort] += token_delta
     result = {
         "label": window["label"],
         "start": iso(window["start"]),
@@ -992,18 +1027,29 @@ def finalize_window(
         "token_resets": int(window["token_resets"]),
         "observed_turn_span_ms": int(sum(span_values)),
         "median_turn_span_ms": int(round(median(span_values))),
-        "models": models[:top],
+        "models": models,
         "_all_models": models,
+        "model_reasoning": model_reasoning,
         "reasoning_efforts": [
-            {"effort": name, "turns": count} for name, count in effort_turns.most_common(top)
+            {
+                "effort": name,
+                "turns": count,
+                "token_delta": int(window["tokens_by_effort"][name]),
+            }
+            for name, count in effort_turns.most_common()
         ],
         "working_reasoning_efforts": [
-            {"effort": name, "turns": count}
-            for name, count in working_effort_turns.most_common(top)
+            {
+                "effort": name,
+                "turns": count,
+                "token_delta": int(working_tokens_by_effort[name]),
+            }
+            for name, count in working_effort_turns.most_common()
         ],
         "automatic_review_turns": int(model_turns.get("codex-auto-review", 0)),
         "tools": tools[:top],
         "_all_tools": tools,
+        "distinct_tools_called": len([item for item in tools if item["calls"] > 0]),
         "tool_calls": sum(int(item["calls"]) for item in tools),
         "tool_runtime_ms": sum(int(item["runtime_ms"]) for item in tools),
         "tool_failures": sum(int(item["failures"]) for item in tools),
@@ -1093,7 +1139,7 @@ def delta(
 
 
 def build_plugin_attribution(current: dict[str, Any], cli: dict[str, Any], top: int) -> list[dict[str, Any]]:
-    plugins = cli.get("plugins", {}).get("enabled_plugins", [])
+    plugins = cli.get("plugins", {}).get("items", [])
     skill_read_rows = current.get("_all_skill_reads")
     skill_reads = (
         {item["name"]: int(item["value"]) for item in skill_read_rows}
@@ -1132,31 +1178,40 @@ def build_plugin_attribution(current: dict[str, Any], cli: dict[str, Any], top: 
             namespace_key = match_key(item["name"])
             if any(key in namespace_key for key in keys):
                 inventoried_tools += int(item["value"])
-        if calls or (reads or 0) or inventoried_tools:
-            rows.append(
-                {
-                    "plugin": plugin_id,
-                    "matched_tool_calls": calls,
-                    "matched_tool_runtime_ms": runtime_ms,
-                    "matched_serialized_output_bytes": outputs,
-                    "matched_skill_reads": reads,
-                    "matched_inventoried_tools": inventoried_tools,
-                    "matched_tools": sorted(set(matched_tools))[:top],
-                    "matched_skills": sorted(set(matched_skills))[:top]
-                    if matched_skills is not None
-                    else None,
-                    "confidence": "medium" if calls else "low",
-                }
-            )
+        has_activity_signal = bool(calls or (reads or 0) or inventoried_tools)
+        rows.append(
+            {
+                "plugin": plugin_id,
+                "version": safe_label(plugin.get("version"), "unknown"),
+                "enabled": plugin.get("enabled") is True,
+                "activity_status": "matched_activity"
+                if has_activity_signal
+                else "no_attributed_activity",
+                "matched_tool_calls": calls,
+                "matched_tool_runtime_ms": runtime_ms,
+                "matched_serialized_output_bytes": outputs,
+                "matched_skill_reads": reads,
+                "matched_inventoried_tools": inventoried_tools,
+                "matched_tools": sorted(set(matched_tools))[:top],
+                "matched_skills": sorted(set(matched_skills))[:top]
+                if matched_skills is not None
+                else None,
+                "confidence": "medium"
+                if calls
+                else ("low" if has_activity_signal else "none"),
+            }
+        )
     rows.sort(
         key=lambda item: (
+            item["activity_status"] != "matched_activity",
             -item["matched_tool_runtime_ms"],
             -item["matched_tool_calls"],
             -(item["matched_skill_reads"] or 0),
+            not item["enabled"],
             item["plugin"],
         )
     )
-    return rows[:top]
+    return rows
 
 
 def build_findings(
@@ -1271,7 +1326,7 @@ def build_findings(
         findings.append(
             {
                 "confidence": "medium",
-                "observed": f"The optional rollout scan associated {human_bytes(current['serialized_tool_output_bytes'])} of serialized rollout records with tool outputs.",
+                "observed": f"Rollout enrichment associated {human_bytes(current['serialized_tool_output_bytes'])} of serialized rollout records with tool outputs.",
                 "interpretation": "This provides a relative output-weight signal across observed tools.",
                 "unknown": "These bytes may include encoding or protocol overhead. Their relationship to model tokens remains unknown.",
             }
@@ -1287,8 +1342,13 @@ def build_findings(
                 "unknown": "Historical enablement and model attachment remain unknown.",
             }
         )
-    if plugin_attribution:
-        top_plugin = plugin_attribution[0]
+    attributed_plugins = [
+        item
+        for item in plugin_attribution
+        if item.get("activity_status") == "matched_activity"
+    ]
+    if attributed_plugins:
+        top_plugin = attributed_plugins[0]
         skill_read_text = (
             f"{top_plugin['matched_skill_reads']} observed SKILL.md reads"
             if top_plugin["matched_skill_reads"] is not None
@@ -1400,6 +1460,15 @@ def make_report(
                 "secrets",
             ],
         },
+        "review_scope": {
+            "scope": "local Codex activity across retained projects and threads",
+            "state_index": True,
+            "read_only_logs": True,
+            "rollout_enrichment": deep_status.get("status") == "scanned",
+            "report_time_codex_profile": True,
+            "project_areas_observed": current["project_areas"],
+            "threads_observed": current["threads"],
+        },
         "current": public_window(current),
         "previous": public_window(previous),
         "comparison": comparisons,
@@ -1408,6 +1477,7 @@ def make_report(
         "plugin_attribution": plugin_attribution,
         "rollout_detail": deep_status,
         "findings": findings,
+        "codex_optimization_prompt": CODEX_OPTIMIZATION_PROMPT,
         "warnings": sorted(set(report_warnings)),
     }
 
@@ -1455,31 +1525,42 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
         for key, label in COMPARISON_LABELS
         if not comparison.get(key, {}).get("comparable", True)
     ]
-    compaction_label = (
-        "Compactions" if current["compaction_source"] == "rollout" else "Compaction attempts"
-    )
+    plugins = report["report_time_snapshot"]["plugins"]
+    mcp = report["report_time_snapshot"]["mcp"]
+    projects = report["report_time_snapshot"]["projects"]
+    rollout = report["rollout_detail"]
+    working_turns = sum(item["turns"] for item in current["working_reasoning_efforts"])
+    working_tokens = sum(item["token_delta"] for item in current["working_reasoning_efforts"])
     lines = [
         "# Codex Activity Review",
         "",
         f"Generated: `{report['generated_at']}`  ",
         f"Window: `{current['start']}` through `{current['end']}`",
         "",
-        f"> This is a rolling {report['days']}-day ({report['days'] * 24}-hour) window, so observed activity can fall across parts of up to {report['days'] + 1} UTC calendar dates.",
+        "## What this review looked over",
         "",
-        "> Local, read-only telemetry review. Prompts, responses, titles, thread IDs, commands, tool results, full paths, and secrets stay private.",
+        f"This is a system-wide review of retained local Codex activity across **{human_int(current['project_areas'])} {plural(current['project_areas'], 'project area')}** and **{human_int(current['threads'])} active {plural(current['threads'], 'thread')}**, rather than a single repository or chat.",
         "",
-        "## Period at a glance",
+        f"- **State index:** thread sources, project-area counts, rollout locations, and retained dynamic-tool inventories.",
+        f"- **Read-only logs:** model labels, reasoning effort, cumulative-token changes, tool calls and runtime, retries, compaction signals, skill-list pressure, and MCP tool-list events.",
+        f"- **Rollout enrichment:** {human_int(rollout.get('files', 0))} {plural(rollout.get('files', 0), 'file')} scanned from {human_bytes(rollout.get('candidate_bytes', 0))} of candidates; task timing, serialized tool-output weight, verification commands, explicit compactions, and observed `SKILL.md` reads.",
+        f"- **Current Codex profile:** Apps status, all {human_int(plugins.get('installed', 0))} installed plugins, {human_int(len(mcp.get('enabled', [])) + len(mcp.get('disabled', [])))} MCP entries, and {human_int(projects.get('stanzas', 0))} project stanzas.",
+        "",
+        "Prompts, responses, titles, thread identifiers, commands, tool results, full paths, configuration values, and secrets stay private.",
+        "",
+        "## Activity overview",
         "",
         f"- **Threads active:** {human_int(current['threads'])}; **prior-window change:** {comparison_text(comparison['threads'])}",
         f"- **Observed turns:** {human_int(current['turns'])} ({comparison_text(comparison['turns'])})",
         f"- **Local cumulative token change:** {human_int(current['token_delta'])} ({comparison_text(comparison['token_delta'])})",
-        f"- **Tool calls:** {human_int(current['tool_calls'])} with {human_duration(current['tool_runtime_ms'])} observed runtime",
-        f"- **Project areas:** {human_int(current['project_areas'])} across {human_int(current['active_days'])} UTC calendar dates with observed activity",
-        f"- **{compaction_label}:** {human_int(current['compactions'])}; **response retries:** {human_int(current['response_retries'])}",
+        f"- **Tools:** {human_int(current['tool_calls'])} {plural(current['tool_calls'], 'call')} across {human_int(current['distinct_tools_called'])} tool {plural(current['distinct_tools_called'], 'label')}; {human_duration(current['tool_runtime_ms'])} observed runtime; {human_int(current['tool_failures'])} retained {plural(current['tool_failures'], 'failure')}",
+        f"- **Tasks:** {optional_count(current['tasks_completed'])} completed {plural(current['tasks_completed'] or 0, 'task')}; {optional_duration(current['task_runtime_ms'])} summed runtime; {optional_count(current['verification_commands'])} verification-like {plural(current['verification_commands'] or 0, 'command')}",
+        f"- **Context management:** {human_int(current['compactions'])} {plural(current['compactions'], 'explicit compaction') if current['compaction_source'] == 'rollout' else plural(current['compactions'], 'compaction attempt')}; {human_int(current['response_retries'])} response {plural(current['response_retries'], 'retry', 'retries')}; {human_int(current['token_resets'])} negative token-reset {plural(current['token_resets'], 'signal')}",
+        f"- **Serialized tool-output records:** {optional_bytes(current['serialized_tool_output_bytes'])}",
     ]
-    if current["tasks_completed"]:
+    if current["tasks_completed"] is not None:
         lines.append(
-            f"- **Rollout task timing:** {human_int(current['tasks_completed'])} completed {plural(current['tasks_completed'], 'task')}; median {human_duration(current['median_task_runtime_ms'])}; median first token {human_duration(current['median_time_to_first_token_ms'])}"
+            f"- **Task medians:** {optional_duration(current['median_task_runtime_ms'])} completion time; {optional_duration(current['median_time_to_first_token_ms'])} to first token"
         )
 
     lines.extend(["", "### Thread sources", "", "| Source | Threads | Share |", "|---|---:|---:|"])
@@ -1489,29 +1570,45 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
     lines.extend(
         [
             "",
-            "## Model and reasoning activity",
+            "## Models and token activity",
             "",
-            "Model timing covers observed end-to-end turn or task activity, including tool work. Concurrent tasks can overlap. Model inference time remains unknown.",
-            "",
-            "| Model | Category | Turns | User-thread turns | Token change | Rollout task runtime | First observed | Last observed |",
-            "|---|---|---:|---:|---:|---:|---|---|",
+            "| Model | Category | Turns | Turn share | User-thread turns | Token change | Token share | Task runtime |",
+            "|---|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
-    for model in current["models"][:top]:
+    for model in current["models"]:
         lines.append(
-            f"| {model['model']} | {model['category']} | {human_int(model['turns'])} | {human_int(model['user_thread_turns'])} | {human_int(model['token_delta'])} | {optional_duration(model['task_runtime_ms'])} | {model['first_observed'] or 'n/a'} | {model['last_observed'] or 'n/a'} |"
+            f"| {model['model']} | {model['category']} | {human_int(model['turns'])} | {percent(model['turns'], current['turns']):.1f}% | {human_int(model['user_thread_turns'])} | {human_int(model['token_delta'])} | {percent(model['token_delta'], current['token_delta']):.1f}% | {optional_duration(model['task_runtime_ms'])} |"
         )
     if not current["models"]:
-        lines.append("| unavailable | unknown | 0 | 0 | 0 | n/a | n/a | n/a |")
+        lines.append("| unavailable | unknown | 0 | 0.0% | 0 | 0 | 0.0% | n/a |")
 
-    lines.extend(["", "### Working-model reasoning levels", "", "| Level | Turns |", "|---|---:|"])
-    for item in current["working_reasoning_efforts"][:top]:
-        lines.append(f"| {item['effort']} | {human_int(item['turns'])} |")
-    if not current["working_reasoning_efforts"]:
-        lines.append("| unavailable | 0 |")
-    lines.append(
-        f"\nAutomatic-review turns in their own category: **{human_int(current['automatic_review_turns'])}** observed. Model switches between turns: **{human_int(current['model_switches'])}**."
+    lines.extend(
+        [
+            "",
+            "### Reasoning effort by model",
+            "",
+            "| Model | Category | Effort | Turns | Working-turn share | Token change | Working-token share |",
+            "|---|---|---|---:|---:|---:|---:|",
+        ]
     )
+    for item in current["model_reasoning"]:
+        turn_share = (
+            percent(item["turns"], working_turns)
+            if item["category"] == "working-model"
+            else 0.0
+        )
+        token_share = (
+            percent(item["token_delta"], working_tokens)
+            if item["category"] == "working-model"
+            else 0.0
+        )
+        lines.append(
+            f"| {item['model']} | {item['category']} | {item['effort']} | {human_int(item['turns'])} | {turn_share:.1f}% | {human_int(item['token_delta'])} | {token_share:.1f}% |"
+        )
+    if not current["model_reasoning"]:
+        lines.append("| unavailable | unknown | unavailable | 0 | 0.0% | 0 | 0.0% |")
+    lines.append(f"\nModel switches between observed turns: **{human_int(current['model_switches'])}**.")
 
     lines.extend(
         [
@@ -1522,12 +1619,15 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             "|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
-    for tool in current["tools"][:top]:
+    for tool in current["tools"]:
         lines.append(
             f"| {tool['tool']} | {human_int(tool['calls'])} | {human_int(tool['automatic_calls'])} | {human_duration(tool['runtime_ms'])} | {human_duration(tool['median_runtime_ms'])} | {human_int(tool['failures'])} | {optional_bytes(tool['serialized_output_bytes'])} |"
         )
     if not current["tools"]:
         lines.append("| unavailable | 0 | 0 | 0s | 0s | 0 | not measured |")
+    lines.append(
+        f"\nDisplayed {human_int(len(current['tools']))} of {human_int(current['distinct_tools_called'])} called tool labels, ranked by runtime and call count."
+    )
     tool_names = {item["tool"] for item in current["tools"]}
     if {"exec", "exec_command"}.issubset(tool_names):
         lines.extend(
@@ -1557,42 +1657,52 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
     lines.extend(
         [
             "",
-            "## Skills and plugins",
+            "## Skills",
             "",
             f"- Skill-list budget-pressure events: **{human_int(skill_context['metadata_truncation_events'])}**",
             f"- Largest observed skill catalog: **{human_int(skill_context['max_catalog_skills'])}**; most descriptions shortened in one event: **{human_int(skill_context['max_truncated_descriptions'])}**; most skills omitted in one event: **{human_int(skill_context['max_omitted_skills'])}**",
             "- Description shortening and whole-skill omission are separate signals; zero omitted skills can coexist with shortened descriptions.",
-            f"- Shadow-selection observations: **{human_int(skill_context['shadow_selection_events'])}**. These are experimental selection signals. Confirmed skill invocation requires separate evidence.",
+            f"- Shadow-selection observations: **{human_int(skill_context['shadow_selection_events'])}**",
         ]
     )
     if current["skill_reads"] is None:
         lines.extend(["", "Observed `SKILL.md` reads: **not measured**."])
     elif current["skill_reads"]:
-        lines.extend(["", "Observed `SKILL.md` reads from the optional rollout scan:", "", "| Skill | Reads |", "|---|---:|"])
+        lines.extend(["", "Observed `SKILL.md` reads:", "", "| Skill | Reads |", "|---|---:|"])
         for item in current["skill_reads"][:top]:
             lines.append(f"| {item['name']} | {human_int(item['value'])} |")
     else:
-        lines.extend(["", "Observed `SKILL.md` reads from the optional rollout scan: **0**."])
-    plugins = report["report_time_snapshot"]["plugins"]
-    lines.append(
-        f"\nReport-time plugin snapshot: **{human_int(plugins.get('enabled', 0))} enabled**, **{human_int(plugins.get('disabled', 0))} disabled**. This is a current availability snapshot. Historical model attachment and use remain unknown."
-    )
-    if report["plugin_attribution"]:
-        lines.extend(
-            [
-                "",
-                "Heuristic plugin attribution uses normalized name matches across observed tools, skill reads, and dynamic namespaces:",
-                "",
-                "| Plugin | Confidence | Tool calls | Tool runtime | Skill reads | Inventoried tools |",
-                "|---|---|---:|---:|---:|---:|",
-            ]
-        )
-        for item in report["plugin_attribution"][:top]:
-            lines.append(
-                f"| {item['plugin']} | {item['confidence']} | {human_int(item['matched_tool_calls'])} | {human_duration(item['matched_tool_runtime_ms'])} | {optional_count(item['matched_skill_reads'])} | {human_int(item['matched_inventoried_tools'])} |"
-            )
+        lines.extend(["", "Observed `SKILL.md` reads: **0**."])
 
-    lines.extend(["", "## Attribution findings", ""])
+    lines.extend(
+        [
+            "",
+            "## Codex profile and plugin weight",
+            "",
+            f"Apps feature: **{report['report_time_snapshot'].get('apps_feature', 'unavailable')}**. Plugins: **{human_int(plugins.get('installed', 0))} installed**, **{human_int(plugins.get('enabled', 0))} enabled**, **{human_int(plugins.get('disabled', 0))} disabled**. Project stanzas: **{human_int(projects.get('stanzas', 0))}**, including **{human_int(projects.get('missing_directories', 0))}** whose directories were unavailable at review time.",
+            "",
+            "Plugin weight below combines current availability with name-matched activity. It measures calls, runtime, serialized output, skill reads, and inventoried tools. Exact per-plugin context tokens and billing tokens remain unavailable.",
+            "",
+            "| Plugin | Version | State | Activity signal | Tool calls | Runtime | Serialized output | Skill reads | Inventoried tools | Confidence |",
+            "|---|---|---|---|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for item in report["plugin_attribution"]:
+        lines.append(
+            f"| {item['plugin']} | {item['version']} | {'enabled' if item['enabled'] else 'disabled'} | {item['activity_status']} | {human_int(item['matched_tool_calls'])} | {human_duration(item['matched_tool_runtime_ms'])} | {optional_bytes(item['matched_serialized_output_bytes'])} | {optional_count(item['matched_skill_reads'])} | {human_int(item['matched_inventoried_tools'])} | {item['confidence']} |"
+        )
+    if not report["plugin_attribution"]:
+        lines.append("| unavailable | unknown | unknown | no profile data | 0 | 0s | not measured | not measured | 0 | none |")
+
+    lines.extend(["", "### MCP profile", "", "| MCP | State |", "|---|---|"])
+    for name in mcp.get("enabled", []):
+        lines.append(f"| {name} | enabled |")
+    for name in mcp.get("disabled", []):
+        lines.append(f"| {name} | disabled |")
+    if not mcp.get("enabled") and not mcp.get("disabled"):
+        lines.append("| unavailable | unknown |")
+
+    lines.extend(["", "## Interpretation", ""])
     for index, finding in enumerate(report["findings"], start=1):
         lines.extend(
             [
@@ -1613,15 +1723,23 @@ def render_markdown(report: dict[str, Any], top: int) -> str:
             f"- Rollout detail: **{report['rollout_detail'].get('status', 'unknown')}**.",
             f"- Log coverage: current {coverage_text(log_coverage['current'])}; previous {coverage_text(log_coverage['previous'])}; token baseline {coverage_text(log_coverage['token_baseline'])}.",
             f"- Suppressed prior-period comparisons: **{join_words(suppressed_comparisons)}**.",
-            "- State-derived thread counts come from the retained thread index; historical completeness is unknown.",
-            "- Rollout-derived values carry the label `not measured` until the optional scan runs.",
-            "- Token changes describe local cumulative telemetry. Billing attribution remains unknown.",
-            "- Tool and rollout task runtimes can overlap across concurrent threads. Schema and result token counts remain unknown.",
-            "- Plugin and MCP snapshots describe report-time configuration unless a timestamped event was observed.",
+            "- State-derived thread history and report-time plugin/MCP state do not establish complete historical availability.",
+            "- Token changes are local cumulative telemetry; exact billing and per-plugin token attribution remain unavailable.",
+            "- Tool and task runtimes can overlap across concurrent work.",
         ]
     )
     for warning in report["warnings"]:
         lines.append(f"- Warning: {warning}.")
+    lines.extend(
+        [
+            "",
+            "## Optional: Codex optimization",
+            "",
+            "```text",
+            report["codex_optimization_prompt"],
+            "```",
+        ]
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -1682,27 +1800,15 @@ def main(argv: list[str] | None = None) -> int:
         except OSError:
             pass
     unique_candidates = sorted(set(candidate_paths))
-    guard_bytes = args.max_auto_rollout_mib * 1024 * 1024
     if args.no_rollouts:
         deep_status = {
             "status": "skipped_by_request",
             "files": 0,
             "candidate_bytes": candidate_bytes,
         }
-    elif args.deep or candidate_bytes <= guard_bytes:
+    else:
         deep_status, deep_warnings = scan_rollouts(unique_candidates, current, previous)
         warnings.extend(deep_warnings)
-    else:
-        required_guard_mib = max(1, math.ceil(candidate_bytes / (1024 * 1024)))
-        deep_status = {
-            "status": "skipped_size_guard",
-            "files": len(unique_candidates),
-            "candidate_bytes": candidate_bytes,
-            "guard_bytes": guard_bytes,
-        }
-        warnings.append(
-            f"optional rollout scan skipped by the {human_bytes(guard_bytes)} disk-work threshold because candidates total {human_bytes(candidate_bytes)}; the core SQLite review is available; rerun with --max-auto-rollout-mib {required_guard_mib} for a guarded scan at the measured size, or use --deep to authorize the scan at any size"
-        )
 
     deep_available = deep_status.get("status") == "scanned"
     current_final = finalize_window(current, metadata, args.top, deep_available)

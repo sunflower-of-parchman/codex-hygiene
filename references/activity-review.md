@@ -8,7 +8,7 @@ Use this reference to interpret `scripts/codex_activity_review.py` output and it
 - [Windows](#windows)
 - [Coverage and comparison](#coverage-and-comparison)
 - [Measurements](#measurements)
-- [Optional rollout detail](#optional-rollout-detail)
+- [Rollout enrichment](#rollout-enrichment)
 - [Attribution language](#attribution-language)
 - [Privacy](#privacy)
 
@@ -53,18 +53,16 @@ Thread counts come from the retained state index and remain a separate state-der
 - **Dynamic-tool surface:** Current retained tool inventory for active threads. Per-turn attachment and invocation remain unknown.
 - **Skill context pressure:** Runtime messages showing that descriptions were shortened or whole skills were omitted to fit the skills-list budget. These are separate signals; zero omissions can coexist with shortened descriptions.
 - **Shadow selection:** Experimental selection telemetry. Confirmed skill invocation requires separate evidence.
-- **Plugin attribution:** A heuristic normalized-name match across currently enabled plugin IDs, observed tool names, rollout-derived `SKILL.md` reads, and dynamic namespaces. Matched tool calls receive medium confidence. Skill or inventory name matches receive low confidence.
-- **Compaction:** Explicit rollout `context_compacted` events supply the count after the optional scan. The lightweight SQLite path uses remote-compaction attempt telemetry.
+- **Plugin review:** Every installed plugin appears with its current enabled state. A heuristic normalized-name match connects plugin IDs to observed tool names, rollout-derived `SKILL.md` reads, and dynamic namespaces. Matched tool calls receive medium confidence. Skill or inventory name matches receive low confidence. Exact context and token weight remain unavailable.
+- **Compaction:** Explicit rollout `context_compacted` events supply the default count. `--no-rollouts` falls back to remote-compaction attempt telemetry.
 
 Automatic-review turns remain visible in their own category alongside working-model reasoning summaries.
 
-## Optional Rollout Detail
+## Rollout Enrichment
 
-The core review reads compact SQLite telemetry at every candidate rollout size and reports the available source coverage.
+The review reads compact SQLite telemetry and enriches it from rollout records inside `CODEX_HOME` by default at every candidate size. The scan reads each file backward and stops at the prior comparison boundary, so the selected period controls the inspected record range.
 
-An optional rollout scan adds task timing, relative serialized output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads. The automatic mode totals candidate rollout sizes first. A 512 MiB default disk-work threshold keeps this first pass lightweight.
-
-Candidate sets within the threshold receive rollout detail automatically. Larger sets receive the core report and `not measured` labels for rollout-derived fields. The warning provides the minimum whole-MiB `--max-auto-rollout-mib N` value for a guarded rerun. That value covers the known candidate size and stops a future scan if the set grows. `--deep` authorizes the scan at any measured size.
+`--no-rollouts` explicitly skips enrichment. In that mode, rollout-derived fields carry `null` or `not measured`, and compaction counts fall back to log-attempt telemetry.
 
 The scan reads files backward, stops at the prior comparison boundary, and extracts these fields:
 
@@ -76,7 +74,7 @@ The scan reads files backward, stops at the prior comparison boundary, and extra
 
 Serialized output size supports relative comparison. Decoded content size, context tokens, and billing usage remain outside this measure.
 
-Task timing, skill reads, verification counts, serialized output sizes, and related plugin fields carry `null` or `not measured` until the optional scan runs. A completed scan with no matching observations reports measured zeros or empty lists.
+Task timing, skill reads, verification counts, serialized output sizes, and related plugin fields carry `null` or `not measured` only when enrichment is skipped or unavailable. A completed scan with no matching observations reports measured zeros or empty lists.
 
 ## Attribution Language
 
@@ -100,6 +98,6 @@ Markdown and JSON output keep these values private:
 - full project and rollout paths
 - configuration values and secrets
 
-Project-area counts use in-memory hashes, and their source paths stay private. The optional rollout scan searches command inputs for narrow verification and `SKILL.md` path patterns, then discards the source text.
+Project-area counts use in-memory hashes, and their source paths stay private. Rollout enrichment searches command inputs for narrow verification and `SKILL.md` path patterns, then discards the source text.
 
-The optional rollout scan follows rollout paths that resolve inside `CODEX_HOME`.
+Rollout enrichment follows only rollout paths that resolve inside `CODEX_HOME`.

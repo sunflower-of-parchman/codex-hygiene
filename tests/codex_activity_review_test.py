@@ -307,13 +307,13 @@ esac
             check=False,
         )
 
-    def test_deep_json_report_is_attributed_and_private(self) -> None:
-        result = self.run_report("--deep", "--format", "json")
+    def test_default_json_report_is_enriched_attributed_and_private(self) -> None:
+        result = self.run_report("--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         current = report["current"]
 
-        self.assertEqual(report["schema_version"], "0.2.0")
+        self.assertEqual(report["schema_version"], "0.3.0")
         self.assertEqual(current["token_delta"], 150)
         self.assertEqual(current["tool_calls"], 1)
         self.assertEqual(current["tool_runtime_ms"], 1200)
@@ -333,10 +333,21 @@ esac
         self.assertEqual(report["previous"]["compactions"], 0)
         self.assertEqual(report["previous"]["compaction_source"], "rollout")
         self.assertEqual(report["rollout_detail"]["status"], "scanned")
+        self.assertTrue(report["review_scope"]["rollout_enrichment"])
+        self.assertEqual(
+            report["review_scope"]["scope"],
+            "local Codex activity across retained projects and threads",
+        )
         self.assertEqual(report["report_time_snapshot"]["plugins"]["enabled"], 1)
         self.assertEqual(report["report_time_snapshot"]["projects"]["missing_directories"], 1)
         self.assertEqual(report["plugin_attribution"][0]["plugin"], "exec@local")
         self.assertEqual(report["plugin_attribution"][0]["matched_tool_calls"], 1)
+        self.assertEqual(len(report["plugin_attribution"]), 2)
+        self.assertEqual(report["plugin_attribution"][1]["plugin"], "beta@local")
+        self.assertFalse(report["plugin_attribution"][1]["enabled"])
+        self.assertIn(
+            "up to three ways", report["codex_optimization_prompt"]
+        )
 
         serialized = json.dumps(report)
         for private_value in (
@@ -357,7 +368,7 @@ esac
             self.assertNotIn(private_value, serialized)
 
     def test_markdown_labels_evidence_and_uncertainty(self) -> None:
-        result = self.run_report("--deep")
+        result = self.run_report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("# Codex Activity Review", result.stdout)
         self.assertIn("**Observed:**", result.stdout)
@@ -371,12 +382,21 @@ esac
             "Suppressed prior-period comparisons: **observed turns, local cumulative token change, tool calls, and tool runtime**.",
             result.stdout,
         )
-        self.assertIn("rolling 7-day (168-hour) window", result.stdout)
+        self.assertIn("## What this review looked over", result.stdout)
+        self.assertIn("system-wide review", result.stdout)
+        self.assertIn("## Codex profile and plugin weight", result.stdout)
+        self.assertIn("### Reasoning effort by model", result.stdout)
+        self.assertIn("| beta@local | unknown | disabled |", result.stdout)
         self.assertIn("most descriptions shortened in one event: **100**", result.stdout)
         self.assertIn("most skills omitted in one event: **0**", result.stdout)
         self.assertIn("zero omitted skills can coexist with shortened descriptions", result.stdout)
-        self.assertIn("Prompts, responses, titles, thread IDs", result.stdout)
+        self.assertIn("Prompts, responses, titles, thread identifiers", result.stdout)
         self.assertIn("stay private", result.stdout)
+        self.assertIn("## Optional: Codex optimization", result.stdout)
+        self.assertIn(
+            "Use this review to identify up to three ways", result.stdout
+        )
+        self.assertTrue(result.stdout.rstrip().endswith("```"))
         self.assertNotIn("Questions raised by the review", result.stdout)
         for private_value in (
             str(self.root),
@@ -512,8 +532,10 @@ esac
         top_all = json.loads(
             self.run_report("--no-rollouts", "--top", "50", "--format", "json").stdout
         )
-        self.assertEqual(len(top_one["current"]["models"]), 1)
-        self.assertGreater(len(top_all["current"]["models"]), 1)
+        self.assertEqual(len(top_one["current"]["models"]), 2)
+        self.assertEqual(len(top_all["current"]["models"]), 2)
+        self.assertEqual(len(top_one["current"]["tools"]), 1)
+        self.assertGreater(len(top_all["current"]["tools"]), 1)
         self.assertEqual(top_one["findings"], top_all["findings"])
         token_finding = next(
             item for item in top_one["findings"] if "cumulative tokens" in item["observed"]
@@ -537,21 +559,17 @@ esac
         self.assertEqual(result.returncode, 2)
         self.assertIn("--days", result.stderr)
 
-    def test_automatic_rollout_size_guard_is_visible(self) -> None:
+    def test_default_rollout_enrichment_has_no_size_guard(self) -> None:
         with self.rollout.open("a", encoding="utf-8") as handle:
             handle.write(" " * (2 * 1024 * 1024))
-        result = self.run_report("--max-auto-rollout-mib", "1", "--format", "json")
+        result = self.run_report("--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["rollout_detail"]["status"], "skipped_size_guard")
-        self.assertIsNone(report["current"]["tasks_completed"])
-        self.assertIsNone(report["current"]["skill_reads"])
-        self.assertIsNone(report["current"]["serialized_tool_output_bytes"])
-        self.assertTrue(any("disk-work threshold" in item for item in report["warnings"]))
-        self.assertTrue(any("core SQLite review is available" in item for item in report["warnings"]))
-        self.assertTrue(
-            any("--max-auto-rollout-mib 3" in item for item in report["warnings"])
-        )
+        self.assertEqual(report["rollout_detail"]["status"], "scanned")
+        self.assertEqual(report["current"]["tasks_completed"], 1)
+        self.assertEqual(report["current"]["skill_reads"][0]["name"], "codex-hygiene")
+        self.assertGreater(report["current"]["serialized_tool_output_bytes"], 0)
+        self.assertFalse(any("size guard" in item for item in report["warnings"]))
 
 
 if __name__ == "__main__":

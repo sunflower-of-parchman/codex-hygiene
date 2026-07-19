@@ -47,17 +47,15 @@ Use JSON for another local interface or deterministic processing:
 python3 "<skill-directory>/scripts/codex_activity_review.py" --days 14 --format json
 ```
 
-The core review uses read-only SQLite telemetry. This lightweight path remains available at every candidate rollout size.
+The review uses read-only SQLite telemetry and enriches it from rollout records inside `CODEX_HOME`. Rollout enrichment runs by default at every candidate size and reads files backward only to the prior comparison boundary. It adds task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads.
 
-An optional rollout scan adds exact task timing, relative serialized tool-output weight, verification-command counts, explicit compactions, and observed `SKILL.md` reads. Before scanning, the script totals the candidate files. The 512 MiB default is a disk-work threshold for this optional pass.
-
-Candidate sets within the threshold receive rollout detail automatically. Larger sets receive the core report, `not measured` labels for rollout-derived fields, and an exact `--max-auto-rollout-mib N` rerun. Use `--deep` to authorize the optional scan at any measured size:
+Use `--no-rollouts` only when the user explicitly wants a lightweight report without rollout-derived fields:
 
 ```bash
-python3 "<skill-directory>/scripts/codex_activity_review.py" --days 30 --deep
+python3 "<skill-directory>/scripts/codex_activity_review.py" --days 30 --no-rollouts
 ```
 
-Read [activity-review.md](references/activity-review.md) for field definitions, confidence, comparison windows, and the optional rollout boundary.
+Read [activity-review.md](references/activity-review.md) for field definitions, confidence, comparison windows, and rollout-enrichment boundaries.
 
 ## Interpret Signals Carefully
 
@@ -69,7 +67,7 @@ Read [activity-review.md](references/activity-review.md) for field definitions, 
 - End-to-end turn and task spans include tool work. Model inference time remains unknown.
 - Summed task runtime can overlap across concurrent work and exceed wall-clock time.
 - Serialized rollout bytes provide a relative output-weight signal. Their relationship to model tokens remains unknown.
-- Rollout-derived values carry `not measured` when the optional scan has not run. Zero belongs to a completed scan with no observations.
+- Rollout-derived values carry `not measured` only when enrichment was explicitly skipped or unavailable. Zero belongs to a completed scan with no observations.
 - Skill metadata selection, `SKILL.md` reads, and confirmed skill invocation are different signals.
 - Treat internal SQLite schemas and cache layouts as version-dependent.
 
@@ -131,10 +129,10 @@ Then rerun the five-minute measurement with that thread id. Good signs include:
 
 Return:
 
-- measured contributor and confidence
+- what the review examined across retained local Codex activity and the current Codex profile
+- comprehensive model, token-change, reasoning-effort, tool, skill, plugin, MCP, task, and context-management statistics
+- plugin weight across matched calls, runtime, serialized output, skill reads, and inventoried tools
 - observed evidence, interpretation, and remaining unknowns as separate statements
 - source coverage and any suppressed comparisons
-- change made or prepared
-- capability intentionally retained
-- remaining uncertainty or approval boundary
-- verification performed
+- exact per-plugin context and billing-token weight as unknown unless directly measured
+- end with the exact heading `Optional: Codex optimization` followed by the concise generated prompt in a code block
